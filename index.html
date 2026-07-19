@@ -1,0 +1,1760 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#f2f2f7">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Besichtigung (Prototyp)</title>
+<style>
+  :root {
+    --bg: #f2f2f7;
+    --karte: #ffffff;
+    --text: #1c1c1e;
+    --sekundaer: #8e8e93;
+    --akzent: #007aff;
+    --rot: #ff3b30;
+    --gruen: #34c759;
+    --orange: #ff9500;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overscroll-behavior: none;
+  }
+  /* Auf dem iPhone volle Breite, am Desktop zentriert in iPhone-Breite */
+  #app { min-height: 100dvh; display: flex; flex-direction: column;
+    width: 100%; max-width: 430px; margin: 0 auto; }
+  /* Desktop-Zentrierung: weitere Regeln am Ende des Stylesheets
+     (müssen NACH den Basisregeln stehen, um left/right zu überschreiben) */
+
+  /* Kopfzeile */
+  .kopf {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 8px;
+    padding: calc(env(safe-area-inset-top) + 10px) 12px 10px;
+    background: rgba(242,242,247,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(0,0,0,0.08);
+  }
+  .kopf h1 { font-size: 17px; font-weight: 600; flex: 1; text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kopf .platz { width: 66px; }
+  .kopf button {
+    border: none; background: none; color: var(--akzent);
+    font-size: 17px; padding: 6px 4px; width: 66px; text-align: left; cursor: pointer;
+  }
+  .kopf button.rechts { text-align: right; }
+
+  .inhalt { flex: 1; padding: 14px 14px calc(env(safe-area-inset-bottom) + 110px); }
+  .inhalt.ohne-leiste { padding-bottom: calc(env(safe-area-inset-bottom) + 24px); }
+
+  .hinweisbanner {
+    background: #fff8e6; border: 1px solid #f0d890; color: #7a5b00;
+    border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px;
+  }
+
+  .sektion-titel { font-size: 13px; color: var(--sekundaer); text-transform: uppercase;
+    letter-spacing: 0.4px; margin: 18px 4px 8px; }
+
+  .karte {
+    background: var(--karte); border-radius: var(--radius);
+    padding: 14px; margin-bottom: 10px; cursor: pointer;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .karte h3 { font-size: 17px; font-weight: 600; margin-bottom: 3px; }
+  .karte .unterzeile { font-size: 14px; color: var(--sekundaer); }
+  .karte .meta { font-size: 12px; color: var(--sekundaer); margin-top: 5px; }
+
+  .leer { text-align: center; color: var(--sekundaer); padding: 60px 24px; font-size: 15px; }
+  .leer .symbol { font-size: 44px; display: block; margin-bottom: 12px; }
+
+  /* Formulare */
+  .feldgruppe { background: var(--karte); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; }
+  .feldgruppe label { display: block; padding: 12px 14px 0; font-size: 12px; color: var(--sekundaer); }
+  .feldgruppe input, .feldgruppe textarea {
+    width: 100%; border: none; background: none; font: inherit; color: inherit;
+    padding: 8px 14px 12px; font-size: 17px; outline: none; resize: none;
+  }
+  .feldgruppe .trenner { height: 1px; background: rgba(0,0,0,0.08); margin-left: 14px; }
+  .fussnote { font-size: 12px; color: var(--sekundaer); margin: -8px 4px 16px; }
+
+  /* Buttons */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; border: none; border-radius: var(--radius); cursor: pointer;
+    font-size: 17px; font-weight: 600; padding: 17px; margin-bottom: 10px;
+  }
+  .btn-primaer { background: var(--akzent); color: #fff; }
+  .btn-sekundaer { background: rgba(0,122,255,0.12); color: var(--akzent); }
+  .btn-rot { background: none; color: var(--rot); font-weight: 400; padding: 12px; }
+  .btn:disabled { opacity: 0.4; }
+  .btn-klein { font-size: 15px; padding: 12px; }
+
+  /* Untere Aktionsleiste */
+  .aktionsleiste {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    display: flex; gap: 10px;
+    padding: 10px 14px calc(env(safe-area-inset-bottom) + 10px);
+    background: rgba(242,242,247,0.92); backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(0,0,0,0.08);
+  }
+  .aktionsleiste .btn { margin-bottom: 0; }
+
+  /* Erfassungszeilen */
+  .zeile {
+    display: flex; gap: 12px; align-items: center;
+    background: var(--karte); border-radius: var(--radius);
+    padding: 10px; margin-bottom: 8px; cursor: pointer;
+  }
+  .zeile .mini {
+    width: 56px; height: 56px; border-radius: 9px; flex-shrink: 0;
+    background: #d8d8dc; object-fit: cover;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+  }
+  .zeile .mini.audio { background: var(--akzent); color: #fff; }
+  .zeile .zeileninfo { flex: 1; min-width: 0; }
+  .zeile .zeileninfo .titelzeile { font-size: 15px; overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .zeile .zeileninfo .datei { font-size: 11px; color: var(--sekundaer);
+    font-family: ui-monospace, Menlo, monospace; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .zeile .zeileninfo .zeit { font-size: 11px; color: var(--sekundaer); margin-top: 2px; }
+
+  /* Kamera */
+  .kamera { position: fixed; inset: 0; background: #000; z-index: 50;
+    display: flex; flex-direction: column; color: #fff; overflow: hidden; }
+  .kamera video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    transform-origin: center center; }
+  .kamera-linsen { position: relative; margin-top: auto; display: flex;
+    justify-content: center; margin-bottom: 14px; }
+  .linsen-gruppe { display: flex; gap: 2px; padding: 4px; border-radius: 99px;
+    background: rgba(0,0,0,0.45); backdrop-filter: blur(6px);
+    max-width: calc(100% - 24px); overflow-x: auto; }
+  .linse { border: none; border-radius: 99px; padding: 8px 14px; cursor: pointer;
+    background: transparent; color: #fff; font-size: 13px; font-weight: 500;
+    white-space: nowrap; }
+  .linse.aktiv { background: #fff; color: #000; font-weight: 700; }
+  .zoom-badge { border: none; cursor: pointer; font-size: 12px; font-weight: 600;
+    padding: 6px 12px; border-radius: 99px; background: rgba(0,0,0,0.55); color: #fff; }
+  .kamera-top {
+    position: relative; display: flex; justify-content: space-between; align-items: center;
+    padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+  }
+  .kamera .rund {
+    width: 44px; height: 44px; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(0,0,0,0.55); color: #fff; font-size: 18px; flex-shrink: 0;
+  }
+  .gps-badge { font-size: 12px; font-weight: 500; padding: 6px 12px; border-radius: 99px;
+    background: rgba(0,0,0,0.55); }
+  .gps-badge.ok { color: var(--gruen); }
+  .gps-badge.fehlt { color: var(--orange); }
+  .kamera-unten { position: relative; display: flex; align-items: center;
+    justify-content: space-evenly; padding-bottom: calc(env(safe-area-inset-bottom) + 26px); }
+  .ausloeser {
+    width: 84px; height: 84px; border-radius: 50%; cursor: pointer;
+    border: 5px solid #fff; background: rgba(255,255,255,0.25); position: relative;
+  }
+  .ausloeser::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; background: #fff; }
+  .kamera-scroll { position: relative; flex: 1; overflow-y: auto;
+    padding: calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 20px); }
+  .kamera-scroll img.vorschau { width: 100%; max-height: 42dvh; object-fit: contain;
+    border-radius: 12px; background: #111; }
+  .mikro-bereich { text-align: center; margin: 18px 0; }
+  .mikro-bereich .mikro { font-size: 36px; }
+  .mikro-bereich .puls { animation: pulsieren 1.1s ease-in-out infinite; display: inline-block; }
+  @keyframes pulsieren { 50% { transform: scale(1.25); opacity: 0.6; } }
+  .live-text {
+    min-height: 62px; margin-top: 12px; padding: 12px;
+    background: rgba(255,255,255,0.12); border-radius: 12px;
+    font-size: 18px; font-weight: 500; text-align: center;
+  }
+  .kamera-scroll .feld-dunkel {
+    width: 100%; font: inherit; font-size: 18px; color: #fff;
+    background: rgba(255,255,255,0.12); border: none; border-radius: 12px;
+    padding: 12px; outline: none; margin-top: 6px;
+  }
+  .datei-vorschau { font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    color: rgba(255,255,255,0.65); margin-top: 8px; }
+  .kamera-hinweis { color: var(--orange); font-size: 13px; margin-top: 10px; }
+  .beschriftung-dunkel { font-size: 12px; color: rgba(255,255,255,0.65); margin-top: 16px; }
+
+  /* Sprachnotiz */
+  .zentriert { flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 22px; padding: 24px; text-align: center; }
+  .aufnahme-knopf {
+    width: 110px; height: 110px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--rot); color: #fff; font-size: 42px;
+  }
+  .aufnahme-knopf .stopp { display: inline-block; width: 38px; height: 38px;
+    background: #fff; border-radius: 8px; }
+  .timer { font-size: 54px; font-weight: 600; font-variant-numeric: tabular-nums;
+    font-family: ui-monospace, Menlo, monospace; }
+  textarea.transkript {
+    width: 100%; min-height: 200px; font: inherit; font-size: 16px;
+    background: var(--karte); border: none; border-radius: var(--radius);
+    padding: 12px; outline: none;
+  }
+
+  /* Detailansichten */
+  .grossbild { width: 100%; border-radius: var(--radius); background: #d8d8dc; }
+  .metabox { background: var(--karte); border-radius: var(--radius); padding: 12px 14px; margin-top: 12px; }
+  .metabox .m-zeile { padding: 6px 0; font-size: 14px; }
+  .metabox .m-zeile b { display: block; font-size: 11px; color: var(--sekundaer); font-weight: 500; }
+  .metabox .m-zeile span { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  audio { width: 100%; margin-top: 10px; }
+
+  .status-punkt { display: inline-block; padding: 3px 10px; border-radius: 99px;
+    font-size: 12px; font-weight: 600; }
+  .status-punkt.offen { background: rgba(52,199,89,0.15); color: #1e8f43; }
+  .status-punkt.zu { background: rgba(142,142,147,0.15); color: var(--sekundaer); }
+
+  .schalter-zeile { display: flex; align-items: center; justify-content: space-between;
+    background: var(--karte); border-radius: var(--radius); padding: 14px; }
+  .schalter-zeile input { width: 26px; height: 26px; accent-color: var(--gruen); }
+
+  .ueberzug {
+    position: fixed; inset: 0; z-index: 60; display: flex; align-items: center;
+    justify-content: center; background: rgba(0,0,0,0.35);
+  }
+  .ueberzug .box { background: var(--karte); border-radius: var(--radius);
+    padding: 22px 28px; font-size: 15px; font-weight: 500; }
+
+  /* KI-Protokoll */
+  .protokoll-text { background: var(--karte); border-radius: var(--radius);
+    padding: 18px; font-size: 15px; line-height: 1.55; white-space: pre-wrap; min-height: 120px; }
+  .protokoll-text h2, .protokoll-text h3, .protokoll-text h4, .protokoll-text h5 {
+    margin: 14px 0 6px; line-height: 1.3; white-space: normal; }
+  .protokoll-text h2 { font-size: 19px; }
+  .protokoll-text h3 { font-size: 16px; }
+  .protokoll-text p { margin: 6px 0; white-space: normal; }
+  .protokoll-text ul { margin: 6px 0; padding-left: 20px; white-space: normal; }
+  .protokoll-text li { margin: 3px 0; }
+
+  @media print {
+    body { background: #fff !important; }
+    #app { max-width: none !important; box-shadow: none !important; }
+    .kopf, #prot-status, #prot-aktionen, .aktionsleiste { display: none !important; }
+    .inhalt { padding: 0 !important; }
+    .protokoll-text { padding: 0; border-radius: 0; }
+  }
+
+  /* Desktop: App-Spalte samt fixierter Overlays (Kamera, Aktionsleiste,
+     Export-Overlay) zentriert in iPhone-Breite. Steht bewusst am Ende,
+     damit es die Basisregeln (left/right/inset) sicher überschreibt. */
+  @media (min-width: 431px) {
+    body { background: #e2e2e8; }
+    #app { background: var(--bg); box-shadow: 0 0 24px rgba(0,0,0,0.12); }
+    .kamera, .ueberzug, .aktionsleiste {
+      left: 50%; right: auto; width: 100%; max-width: 430px;
+      transform: translateX(-50%);
+    }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+'use strict';
+
+/* ============================================================
+   Besichtigungs-App — klickbarer Web-Prototyp (Demo ohne Xcode)
+   Bildet die Flows der echten iOS-App nach (Spec §7/§8):
+   Fotos mit (gesprochenem) Label, Sprachnotizen mit Transkript,
+   Export als ZIP mit protokoll-rohdaten.md + manifest.json.
+   ============================================================ */
+
+// ---------- Hilfsfunktionen ----------
+
+const $ = sel => document.querySelector(sel);
+
+function escapeHTML(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+const pad = (n, l = 2) => String(n).padStart(l, '0');
+
+function formatDatum(iso) {
+  const d = new Date(iso);
+  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+}
+function formatDatumZeit(iso) {
+  const d = new Date(iso);
+  return `${formatDatum(iso)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function formatZeit(iso) {
+  const d = new Date(iso);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function formatDauer(sek) {
+  sek = Math.max(0, Math.round(sek));
+  return `${pad(Math.floor(sek / 60))}:${pad(sek % 60)}`;
+}
+function isoDatum(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function gpsText(lat, lon) {
+  if (lat == null || lon == null) return null;
+  return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+}
+
+// ---------- Slug-Logik (identisch zur iOS-App, Spec §7.1) ----------
+
+function slugErzeugen(text, maxLaenge = 60) {
+  let s = String(text).toLowerCase()
+    .replaceAll('ä', 'ae').replaceAll('ö', 'oe').replaceAll('ü', 'ue').replaceAll('ß', 'ss')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '');
+  let slug = '';
+  for (const z of s) {
+    if (/[a-z0-9]/.test(z)) slug += z;
+    else if (/[\s\-_\/]/.test(z)) slug += '-';
+  }
+  slug = slug.replace(/-+/g, '-').replace(/^-|-$/g, '');
+  if (slug.length > maxLaenge) slug = slug.slice(0, maxLaenge).replace(/-$/, '');
+  return slug;
+}
+
+function slugEindeutig(slug, vorhandene) {
+  if (!vorhandene.has(slug)) return slug;
+  let n = 2;
+  while (vorhandene.has(`${slug}-${n}`)) n++;
+  return `${slug}-${n}`;
+}
+
+function slugAusDateiname(name) {
+  return name.replace(/\.[^.]+$/, '').replace(/^[^_]*_/, '');
+}
+
+// ---------- Persistenz: Metadaten in localStorage, Medien in IndexedDB ----------
+
+let besichtigungen = JSON.parse(localStorage.getItem('besichtigungen') || '[]');
+function speichereDaten() {
+  localStorage.setItem('besichtigungen', JSON.stringify(besichtigungen));
+}
+function einstellung(name, standard) {
+  const wert = localStorage.getItem(name);
+  return wert === null ? standard : wert === '1';
+}
+
+let dbPromise = null;
+function oeffneDB() {
+  if (!dbPromise) {
+    dbPromise = new Promise((ok, nein) => {
+      const anfrage = indexedDB.open('besichtigung-prototyp', 1);
+      anfrage.onupgradeneeded = () => anfrage.result.createObjectStore('medien');
+      anfrage.onsuccess = () => ok(anfrage.result);
+      anfrage.onerror = () => nein(anfrage.error);
+    });
+  }
+  return dbPromise;
+}
+async function medienSpeichern(schluessel, blob) {
+  const db = await oeffneDB();
+  return new Promise((ok, nein) => {
+    const tx = db.transaction('medien', 'readwrite');
+    tx.objectStore('medien').put(blob, schluessel);
+    tx.oncomplete = ok;
+    tx.onerror = () => nein(tx.error);
+  });
+}
+async function medienLaden(schluessel) {
+  const db = await oeffneDB();
+  return new Promise((ok, nein) => {
+    const anfrage = db.transaction('medien').objectStore('medien').get(schluessel);
+    anfrage.onsuccess = () => ok(anfrage.result || null);
+    anfrage.onerror = () => nein(anfrage.error);
+  });
+}
+async function medienLoeschen(schluessel) {
+  const db = await oeffneDB();
+  db.transaction('medien', 'readwrite').objectStore('medien').delete(schluessel);
+}
+
+const urlCache = new Map();
+async function medienURL(schluessel) {
+  if (urlCache.has(schluessel)) return urlCache.get(schluessel);
+  const blob = await medienLaden(schluessel);
+  if (!blob) return null;
+  const url = URL.createObjectURL(blob);
+  urlCache.set(schluessel, url);
+  return url;
+}
+
+// ---------- ZIP-Erzeugung (Store-Methode, ohne Bibliotheken) ----------
+
+const crcTabelle = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c;
+  }
+  return t;
+})();
+function crc32(daten) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < daten.length; i++) c = crcTabelle[(c ^ daten[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+function zipErstellen(eintraege) { // [{name, daten: Uint8Array}]
+  const encoder = new TextEncoder();
+  const teile = [], zentral = [];
+  let offset = 0;
+  for (const e of eintraege) {
+    const nameBytes = encoder.encode(e.name);
+    const crc = crc32(e.daten);
+    const lokal = new DataView(new ArrayBuffer(30));
+    lokal.setUint32(0, 0x04034b50, true);
+    lokal.setUint16(4, 20, true);
+    lokal.setUint16(6, 0x0800, true);          // UTF-8-Dateinamen
+    lokal.setUint16(8, 0, true);               // Methode: Store
+    lokal.setUint16(10, 0, true);
+    lokal.setUint16(12, 0x58E1, true);         // festes Dummy-Datum
+    lokal.setUint32(14, crc, true);
+    lokal.setUint32(18, e.daten.length, true);
+    lokal.setUint32(22, e.daten.length, true);
+    lokal.setUint16(26, nameBytes.length, true);
+    lokal.setUint16(28, 0, true);
+    teile.push(new Uint8Array(lokal.buffer), nameBytes, e.daten);
+
+    const zent = new DataView(new ArrayBuffer(46));
+    zent.setUint32(0, 0x02014b50, true);
+    zent.setUint16(4, 20, true);
+    zent.setUint16(6, 20, true);
+    zent.setUint16(8, 0x0800, true);
+    zent.setUint16(10, 0, true);
+    zent.setUint16(12, 0, true);
+    zent.setUint16(14, 0x58E1, true);
+    zent.setUint32(16, crc, true);
+    zent.setUint32(20, e.daten.length, true);
+    zent.setUint32(24, e.daten.length, true);
+    zent.setUint16(28, nameBytes.length, true);
+    zent.setUint32(42, offset, true);
+    zentral.push(new Uint8Array(zent.buffer), nameBytes);
+    offset += 30 + nameBytes.length + e.daten.length;
+  }
+  let zentralLaenge = 0;
+  zentral.forEach(t => zentralLaenge += t.length);
+  const ende = new DataView(new ArrayBuffer(22));
+  ende.setUint32(0, 0x06054b50, true);
+  ende.setUint16(8, eintraege.length, true);
+  ende.setUint16(10, eintraege.length, true);
+  ende.setUint32(12, zentralLaenge, true);
+  ende.setUint32(16, offset, true);
+  return new Blob([...teile, ...zentral, new Uint8Array(ende.buffer)], { type: 'application/zip' });
+}
+
+// ---------- Spracherkennung (Safari/Chrome: webkitSpeechRecognition) ----------
+
+function erstelleErkennung(aufText, aufFehler) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+  let gestoppt = false;
+  let gesamt = '';    // finaler Text aus früheren Erkennungs-Sitzungen
+  let sitzung = '';   // finaler Text der laufenden Sitzung
+  let anzeige = '';
+  const r = new SR();
+  r.lang = 'de-DE';
+  r.continuous = true;
+  r.interimResults = true;
+  r.onresult = e => {
+    let zwischen = '';
+    sitzung = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) sitzung += e.results[i][0].transcript + ' ';
+      else zwischen += e.results[i][0].transcript;
+    }
+    anzeige = (gesamt + ' ' + sitzung + zwischen).replace(/\s+/g, ' ').trim();
+    aufText(anzeige);
+  };
+  r.onerror = e => {
+    if (e.error === 'aborted' || e.error === 'no-speech') return; // harmlos
+    gestoppt = true; // sonst Endlosschleife über den Auto-Neustart in onend
+    if (aufFehler) aufFehler(e.error);
+  };
+  // Chrome beendet die Erkennung nach Sprechpausen von selbst —
+  // bei längeren Aufnahmen automatisch neu starten, Text bleibt erhalten.
+  r.onend = () => {
+    gesamt = (gesamt + ' ' + sitzung).replace(/\s+/g, ' ').trim();
+    sitzung = '';
+    if (!gestoppt) { try { r.start(); } catch (_) {} }
+  };
+  return {
+    starten() { try { r.start(); } catch (_) {} },
+    stoppen() { gestoppt = true; try { r.stop(); } catch (_) {} },
+    text: () => anzeige
+  };
+}
+
+// ---------- Linsen-Erkennung ----------
+
+/**
+ * Ordnet videoinput-Geräte den Objektiven zu (iPhone: 0,5× / 1× / 3×).
+ * iOS meldet zusätzlich virtuelle Verbund-Kameras („Dual", „Triple") —
+ * die duplizieren die physischen Linsen und werden ausgeblendet,
+ * pro Linse bleibt genau ein Gerät übrig.
+ */
+function linsenErkennen(kameras) {
+  const istFront = g => /front|user|selfie|facetime/i.test(g.label || '');
+  const istVirtuell = g => /dual|triple|doppel|dreifach|virtual/i.test(g.label || '');
+
+  let kandidaten = kameras.filter(g => !istFront(g));
+  if (!kandidaten.length) kandidaten = kameras;
+  const physisch = kandidaten.filter(g => !istVirtuell(g));
+  if (physisch.length) kandidaten = physisch;
+
+  let unbenannt = 0;
+  const geraete = kandidaten.map(g => {
+    const l = g.label || '';
+    let name, rang;
+    if (/ultra|0[.,]5/i.test(l)) { name = '0,5×'; rang = 0; }
+    else if (/tele/i.test(l)) { name = '3×'; rang = 2; }
+    else if (/back|rück|rueck|environment|weitwinkel|wide|haupt/i.test(l) || kandidaten.length === 1) { name = '1×'; rang = 1; }
+    else { unbenannt += 1; name = 'Kam ' + unbenannt; rang = 3; }
+    return { id: g.deviceId, name, rang };
+  }).sort((a, c) => a.rang - c.rang);
+
+  // Pro Linsen-Name nur das erste Gerät behalten — nie mehr „1× (2)", „1× (3)" …
+  const gesehen = new Set();
+  return geraete.filter(g => {
+    if (gesehen.has(g.name)) return false;
+    gesehen.add(g.name);
+    return true;
+  });
+}
+
+function kameraFehlerText(fehler) {
+  switch (fehler && fehler.name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+      return 'Kamera-Zugriff verweigert — in der Adressleiste auf das Kamera-/Schloss-Symbol klicken, Kamera erlauben und die Seite neu laden.';
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'Keine Kamera gefunden — ist eine Webcam angeschlossen/aktiviert?';
+    case 'NotReadableError':
+    case 'AbortError':
+      return 'Die Kamera ist gerade von einem anderen Programm belegt (z. B. Teams/Zoom) — Programm schließen und Seite neu laden.';
+    case 'SecurityError':
+      return 'Kamera-Zugriff ist nur über localhost oder HTTPS möglich.';
+    default:
+      return `Keine Live-Vorschau möglich (${fehler && fehler.name ? fehler.name : 'unbekannter Fehler'}).`;
+  }
+}
+
+function erkennungsFehlerText(code) {
+  switch (code) {
+    case 'nicht-vorhanden':
+      return 'Dieser Browser hat keine Spracherkennung — am PC bitte Google Chrome verwenden. Text bitte eintippen.';
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'Mikrofon-Zugriff für die Spracherkennung verweigert — im Browser erlauben (Schloss-Symbol in der Adressleiste).';
+    case 'audio-capture':
+      return 'Kein Mikrofon gefunden — bitte Mikrofon anschließen/aktivieren.';
+    case 'network':
+      return 'Spracherkennung nicht erreichbar — Internetverbindung prüfen bzw. am PC Google Chrome verwenden.';
+    case 'language-not-supported':
+      return 'Deutsch wird von der Spracherkennung dieses Browsers nicht unterstützt — bitte Google Chrome verwenden.';
+    default:
+      return `Spracherkennung-Fehler (${code}) — Text bitte eintippen.`;
+  }
+}
+
+// ---------- Router ----------
+
+let route = { name: 'liste' };
+let aufraeumFn = null;
+
+function navigiere(neueRoute) {
+  if (aufraeumFn) { try { aufraeumFn(); } catch (_) {} aufraeumFn = null; }
+  route = neueRoute;
+  window.scrollTo(0, 0);
+  render();
+}
+
+function holeBesichtigung(id) {
+  return besichtigungen.find(b => b.id === id);
+}
+
+function render() {
+  const app = $('#app');
+  switch (route.name) {
+    case 'liste': return zeigeListe(app);
+    case 'neu': return zeigeNeu(app);
+    case 'detail': return zeigeDetail(app, holeBesichtigung(route.id));
+    case 'kamera': return zeigeKamera(app, holeBesichtigung(route.id));
+    case 'sprachnotiz': return zeigeSprachnotiz(app, holeBesichtigung(route.id));
+    case 'fotoDetail': return zeigeFotoDetail(app, holeBesichtigung(route.id), route.fotoId);
+    case 'notizDetail': return zeigeNotizDetail(app, holeBesichtigung(route.id), route.notizId);
+    case 'protokoll': return zeigeProtokoll(app, holeBesichtigung(route.id));
+    case 'einstellungen': return zeigeEinstellungen(app);
+  }
+}
+
+function kopfzeile(titel, zurueckRoute, rechtsHTML = '<span class="platz"></span>') {
+  return `<div class="kopf">
+    ${zurueckRoute ? `<button id="k-zurueck">‹ Zurück</button>` : '<span class="platz"></span>'}
+    <h1>${escapeHTML(titel)}</h1>
+    ${rechtsHTML}
+  </div>`;
+}
+function bindeZurueck(zurueckRoute) {
+  const btn = $('#k-zurueck');
+  if (btn) btn.onclick = () => navigiere(zurueckRoute);
+}
+
+// ---------- Screen 1: Besichtigungsliste ----------
+
+function zeigeListe(app) {
+  const offene = besichtigungen.filter(b => b.status === 'offen');
+  const zu = besichtigungen.filter(b => b.status === 'abgeschlossen');
+
+  const kartenHTML = liste => liste.map(b => `
+    <div class="karte" data-id="${b.id}">
+      <h3>${escapeHTML(b.titel)}</h3>
+      ${b.adresse ? `<div class="unterzeile">${escapeHTML(b.adresse)}</div>` : ''}
+      <div class="meta">${formatDatum(b.erstelltAm)} · ${b.fotos.length} Fotos · ${b.sprachnotizen.length} Notizen</div>
+    </div>`).join('');
+
+  app.innerHTML = `
+    ${kopfzeile('Besichtigungen', null, '<button class="rechts" id="k-neu" style="font-size:24px">＋</button>')}
+    <div class="inhalt ohne-leiste">
+      <div class="hinweisbanner">Prototyp — Demo der geplanten iOS-App. Daten bleiben lokal in diesem Browser.</div>
+      ${besichtigungen.length === 0 ? `
+        <div class="leer"><span class="symbol">🏠</span>Noch keine Besichtigungen.<br>Mit „＋" die erste anlegen.</div>` : `
+        ${offene.length ? `<div class="sektion-titel">Offen</div>${kartenHTML(offene)}` : ''}
+        ${zu.length ? `<div class="sektion-titel">Abgeschlossen</div>${kartenHTML(zu)}` : ''}`}
+      <button class="btn btn-sekundaer btn-klein" id="k-einstellungen" style="margin-top:18px">⚙️ Einstellungen</button>
+    </div>`;
+
+  $('#k-neu').onclick = () => navigiere({ name: 'neu' });
+  $('#k-einstellungen').onclick = () => navigiere({ name: 'einstellungen' });
+  app.querySelectorAll('.karte[data-id]').forEach(el => {
+    el.onclick = () => navigiere({ name: 'detail', id: el.dataset.id });
+  });
+}
+
+// ---------- Screen 2: Neue Besichtigung ----------
+
+function zeigeNeu(app) {
+  app.innerHTML = `
+    ${kopfzeile('Neue Besichtigung', { name: 'liste' })}
+    <div class="inhalt ohne-leiste">
+      <div class="feldgruppe">
+        <label>Titel *</label>
+        <input id="f-titel" placeholder="z. B. Adresse oder Kurzname" autocomplete="off">
+        <div class="trenner"></div>
+        <label>Adresse (optional)</label>
+        <input id="f-adresse" placeholder="Straße, Ort" autocomplete="off">
+        <div class="trenner"></div>
+        <label>Freitextnotiz (optional)</label>
+        <textarea id="f-notiz" rows="3" placeholder="Auftrag, Besonderheiten …"></textarea>
+      </div>
+      <button class="btn btn-primaer" id="f-anlegen" disabled>Anlegen</button>
+    </div>`;
+
+  bindeZurueck({ name: 'liste' });
+  const titel = $('#f-titel');
+  titel.oninput = () => { $('#f-anlegen').disabled = !titel.value.trim(); };
+  $('#f-anlegen').onclick = () => {
+    const b = {
+      id: crypto.randomUUID(),
+      titel: titel.value.trim(),
+      adresse: $('#f-adresse').value.trim() || null,
+      freitextNotiz: $('#f-notiz').value.trim() || null,
+      erstelltAm: new Date().toISOString(),
+      abgeschlossenAm: null,
+      status: 'offen',
+      fotos: [],
+      sprachnotizen: []
+    };
+    besichtigungen.unshift(b);
+    speichereDaten();
+    navigiere({ name: 'detail', id: b.id });
+  };
+  titel.focus();
+}
+
+// ---------- Screen 3: Besichtigungs-Detail (Hub) ----------
+
+function zeigeDetail(app, b) {
+  if (!b) return navigiere({ name: 'liste' });
+
+  const eintraege = [
+    ...b.fotos.map(f => ({ art: 'foto', datum: f.aufgenommenAm, f })),
+    ...b.sprachnotizen.map(n => ({ art: 'notiz', datum: n.aufgenommenAm, n }))
+  ].sort((a, c) => a.datum < c.datum ? -1 : 1);
+
+  const eintragHTML = e => e.art === 'foto' ? `
+    <div class="zeile" data-foto="${e.f.id}">
+      <img class="mini" data-medien="${e.f.id}" alt="">
+      <div class="zeileninfo">
+        <div class="titelzeile">${escapeHTML(e.f.labelText)}</div>
+        <div class="datei">${escapeHTML(e.f.dateiname)}</div>
+        <div class="zeit">${formatZeit(e.f.aufgenommenAm)} Uhr</div>
+      </div>
+    </div>` : `
+    <div class="zeile" data-notiz="${e.n.id}">
+      <div class="mini audio">🎙️</div>
+      <div class="zeileninfo">
+        <div class="titelzeile">${escapeHTML(e.n.transkript || 'Kein Transkript')}</div>
+        <div class="zeit">${formatDauer(e.n.dauer)} · ${formatZeit(e.n.aufgenommenAm)} Uhr</div>
+      </div>
+    </div>`;
+
+  const istOffen = b.status === 'offen';
+
+  app.innerHTML = `
+    ${kopfzeile(b.titel, { name: 'liste' }, '<button class="rechts" id="k-export">Export</button>')}
+    <div class="inhalt ${istOffen ? '' : 'ohne-leiste'}">
+      <div class="metabox" style="margin-top:0">
+        ${b.adresse ? `<div class="m-zeile"><b>Adresse</b>${escapeHTML(b.adresse)}</div>` : ''}
+        <div class="m-zeile"><b>Erstellt</b>${formatDatumZeit(b.erstelltAm)}</div>
+        ${b.abgeschlossenAm ? `<div class="m-zeile"><b>Abgeschlossen</b>${formatDatumZeit(b.abgeschlossenAm)}</div>` : ''}
+        <div class="m-zeile"><b>Status</b><span class="status-punkt ${istOffen ? 'offen' : 'zu'}">${istOffen ? 'Offen' : 'Abgeschlossen'}</span></div>
+        <div class="m-zeile"><b>Freitextnotiz</b>
+          <input id="d-notiz" style="width:100%;border:none;background:none;font:inherit;font-size:14px;outline:none"
+                 placeholder="optional …" value="${escapeHTML(b.freitextNotiz || '')}"></div>
+      </div>
+
+      <div class="sektion-titel">Erfassungen (${eintraege.length})</div>
+      ${eintraege.length === 0
+        ? '<div class="leer" style="padding:28px">Noch nichts erfasst — unten Foto oder Sprachnotiz aufnehmen.</div>'
+        : eintraege.map(eintragHTML).join('')}
+
+      ${istOffen ? '' : kiProtokollSektion(b)}
+      ${istOffen
+        ? '<button class="btn btn-sekundaer btn-klein" id="d-abschliessen" style="margin-top:16px">✓ Abschließen &amp; Exportieren</button>'
+        : '<button class="btn btn-sekundaer btn-klein" id="d-oeffnen" style="margin-top:16px">Wieder öffnen</button>'}
+      <button class="btn btn-rot" id="d-loeschen">Besichtigung löschen</button>
+    </div>
+    ${istOffen ? `
+    <div class="aktionsleiste">
+      <button class="btn btn-primaer" id="d-foto" style="flex:1">📷 Foto</button>
+      <button class="btn btn-sekundaer" id="d-sprachnotiz" style="flex:1">🎙️ Sprachnotiz</button>
+    </div>` : ''}`;
+
+  bindeZurueck({ name: 'liste' });
+  $('#d-notiz').onchange = ev => { b.freitextNotiz = ev.target.value.trim() || null; speichereDaten(); };
+  $('#k-export').onclick = () => exportiere(b);
+  if (istOffen) {
+    $('#d-foto').onclick = () => navigiere({ name: 'kamera', id: b.id });
+    $('#d-sprachnotiz').onclick = () => navigiere({ name: 'sprachnotiz', id: b.id });
+    $('#d-abschliessen').onclick = () => {
+      if (!confirm('Besichtigung abschließen und Export-Paket erstellen?')) return;
+      b.status = 'abgeschlossen';
+      b.abgeschlossenAm = new Date().toISOString();
+      speichereDaten();
+      exportiere(b).then(() => render());
+    };
+  } else {
+    $('#d-oeffnen').onclick = () => {
+      b.status = 'offen';
+      b.abgeschlossenAm = null;
+      speichereDaten();
+      render();
+    };
+    const anzeigen = $('#d-prot-anzeigen');
+    if (anzeigen) anzeigen.onclick = () => navigiere({ name: 'protokoll', id: b.id });
+    const neuKnopf = $('#d-prot-neu');
+    if (neuKnopf) neuKnopf.onclick = () => starteKiProtokoll(b);
+    const erstellenKnopf = $('#d-prot-erstellen');
+    if (erstellenKnopf) erstellenKnopf.onclick = () => starteKiProtokoll(b);
+  }
+  $('#d-loeschen').onclick = () => {
+    if (!confirm('Besichtigung samt aller Fotos und Sprachnotizen endgültig löschen?')) return;
+    b.fotos.forEach(f => medienLoeschen(f.id));
+    b.sprachnotizen.forEach(n => medienLoeschen(n.id));
+    besichtigungen = besichtigungen.filter(x => x.id !== b.id);
+    speichereDaten();
+    navigiere({ name: 'liste' });
+  };
+  app.querySelectorAll('[data-foto]').forEach(el => {
+    el.onclick = () => navigiere({ name: 'fotoDetail', id: b.id, fotoId: el.dataset.foto });
+  });
+  app.querySelectorAll('[data-notiz]').forEach(el => {
+    el.onclick = () => navigiere({ name: 'notizDetail', id: b.id, notizId: el.dataset.notiz });
+  });
+  ladeMiniaturen(app);
+}
+
+async function ladeMiniaturen(app) {
+  for (const img of app.querySelectorAll('img[data-medien]')) {
+    const url = await medienURL(img.dataset.medien);
+    if (url) img.src = url;
+  }
+}
+
+// ---------- Screen 4: Kamera mit gesprochenem Label ----------
+
+function zeigeKamera(app, b) {
+  if (!b) return navigiere({ name: 'liste' });
+
+  let stream = null, gpsWaechter = null;
+  let koordinaten = null;
+  let fotoBlob = null, fotoURL = null;
+  let erkennung = null, labelText = '';
+  // Kamera-Auswahl & Zoom
+  let videoEl = null, spur = null;
+  let geraete = [], aktuelleDeviceId = null;
+  let zoomFaktor = 1, zoomMin = 1, zoomMax = 5, zoomModus = 'digital';
+
+  aufraeumFn = () => {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (gpsWaechter !== null) navigator.geolocation.clearWatch(gpsWaechter);
+    if (erkennung) erkennung.stoppen();
+    if (fotoURL) URL.revokeObjectURL(fotoURL);
+  };
+
+  const naechsteNr = () => (b.fotos.length ? Math.max(...b.fotos.map(f => f.laufendeNr)) : 0) + 1;
+  function dateinameVorschau() {
+    const nr = naechsteNr();
+    let slug = slugErzeugen(labelText.trim() || `foto-${nr}`) || `foto-${nr}`;
+    slug = slugEindeutig(slug, new Set(b.fotos.map(f => slugAusDateiname(f.dateiname))));
+    return `${pad(nr, 3)}_${slug}.jpg`;
+  }
+
+  // GPS im Hintergrund mitlaufen lassen (kein Fix ist ok, Spec §7.1)
+  if (navigator.geolocation) {
+    gpsWaechter = navigator.geolocation.watchPosition(
+      p => { koordinaten = { lat: p.coords.latitude, lon: p.coords.longitude }; aktualisiereGPSBadge(); },
+      () => {}, { enableHighAccuracy: true, maximumAge: 30000 }
+    );
+  }
+  function aktualisiereGPSBadge() {
+    const badge = $('#gps-badge');
+    if (!badge) return;
+    badge.textContent = koordinaten ? '📍 GPS' : '📍 kein GPS';
+    badge.className = 'gps-badge ' + (koordinaten ? 'ok' : 'fehlt');
+  }
+
+  phaseLive();
+
+  /** Startet den Kamerastream (optional mit fester Linse) und ermittelt Zoom-Fähigkeiten. */
+  async function starteStream(deviceId) {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    const wunsch = deviceId
+      ? { video: { deviceId: { exact: deviceId }, width: { ideal: 1920 } }, audio: false }
+      : { video: { facingMode: 'environment', width: { ideal: 1920 } }, audio: false };
+    stream = await navigator.mediaDevices.getUserMedia(wunsch);
+    spur = stream.getVideoTracks()[0];
+    aktuelleDeviceId = (spur.getSettings && spur.getSettings().deviceId) || deviceId || null;
+    videoEl.srcObject = stream;
+
+    // Hardware-Zoom (iOS 17+/Android), sonst Digital-Zoom via Transform + Bildausschnitt
+    zoomFaktor = 1;
+    const faehigkeiten = spur.getCapabilities ? spur.getCapabilities() : {};
+    if (faehigkeiten.zoom && typeof faehigkeiten.zoom.max === 'number') {
+      zoomModus = 'hardware';
+      zoomMin = Math.max(1, faehigkeiten.zoom.min || 1);
+      zoomMax = faehigkeiten.zoom.max;
+      zoomFaktor = zoomMin;
+    } else {
+      zoomModus = 'digital'; zoomMin = 1; zoomMax = 5;
+    }
+    wendeZoomAn();
+    await ladeLinsen();
+    zeichneLinsen();
+  }
+
+  function wendeZoomAn() {
+    const badge = $('#ka-zoom');
+    if (badge) {
+      badge.textContent = (Math.round(zoomFaktor * 10) / 10).toLocaleString('de-DE') + '×';
+      // Nur zeigen, wenn wirklich gezoomt ist — Tipp darauf setzt zurück.
+      badge.hidden = zoomFaktor <= zoomMin + 0.001;
+    }
+    if (!videoEl) return;
+    if (zoomModus === 'hardware' && spur) {
+      spur.applyConstraints({ advanced: [{ zoom: zoomFaktor }] }).catch(() => {});
+      videoEl.style.transform = '';
+    } else {
+      videoEl.style.transform = zoomFaktor > 1.001 ? `scale(${zoomFaktor})` : '';
+    }
+  }
+
+  /** Erkennt die Objektive des Geräts (iPhone: Ultraweitwinkel/Weitwinkel/Tele als eigene Kameras). */
+  async function ladeLinsen() {
+    if (geraete.length) return;
+    try {
+      const alle = await navigator.mediaDevices.enumerateDevices();
+      geraete = linsenErkennen(alle.filter(g => g.kind === 'videoinput'));
+    } catch (_) { geraete = []; }
+  }
+
+  function zeichneLinsen() {
+    const reihe = $('#ka-linsen');
+    if (!reihe) return;
+    if (geraete.length < 2) { reihe.innerHTML = ''; return; }
+    // Falls der aktive Stream keinem Button entspricht (z. B. iOS-Standardkamera
+    // mit eigener virtueller Geräte-ID), die 1×-Linse als aktiv markieren.
+    let aktivId = aktuelleDeviceId;
+    if (!geraete.some(g => g.id === aktivId)) {
+      const standard = geraete.find(g => g.name === '1×');
+      if (standard) aktivId = standard.id;
+    }
+    reihe.innerHTML = '<div class="linsen-gruppe">' + geraete.map(g =>
+      `<button class="linse ${g.id === aktivId ? 'aktiv' : ''}" data-linse="${escapeHTML(g.id)}">${escapeHTML(g.name)}</button>`
+    ).join('') + '</div>';
+    reihe.querySelectorAll('[data-linse]').forEach(knopf => {
+      knopf.onclick = async () => {
+        if (knopf.dataset.linse === aktuelleDeviceId) return;
+        try {
+          await starteStream(knopf.dataset.linse);
+        } catch (_) {
+          // Linse nicht startbar → zurück zur vorherigen
+          starteStream(aktuelleDeviceId).catch(() => {});
+        }
+      };
+    });
+  }
+
+  async function phaseLive() {
+    app.innerHTML = `
+      <div class="kamera">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="kamera-top">
+          <button class="rund" id="ka-zu">✕</button>
+          <button class="zoom-badge" id="ka-zoom" hidden title="Zoom zurücksetzen">1×</button>
+          <span class="gps-badge fehlt" id="gps-badge">📍 kein GPS</span>
+        </div>
+        <div class="kamera-linsen" id="ka-linsen"></div>
+        <div class="kamera-unten">
+          <button class="rund" id="ka-galerie" aria-label="Foto aus Datei wählen">🖼️</button>
+          <button class="ausloeser" id="ausloeser" aria-label="Foto auslösen"></button>
+          <button class="rund" style="visibility:hidden" tabindex="-1"></button>
+        </div>
+        <input type="file" accept="image/*" capture="environment" id="ka-fallback" hidden>
+        <input type="file" accept="image/*" id="ka-datei" hidden>
+      </div>`;
+    $('#ka-zu').onclick = () => navigiere({ name: 'detail', id: b.id });
+    const dateiWahl = $('#ka-datei');
+    $('#ka-galerie').onclick = () => dateiWahl.click();
+    dateiWahl.onchange = () => { if (dateiWahl.files[0]) fotoAufgenommen(dateiWahl.files[0]); };
+    aktualisiereGPSBadge();
+
+    videoEl = $('#video');
+
+    // Zoom-Gesten: Pinch (Touch), Mausrad (Desktop), Tipp auf Badge = zurücksetzen
+    const wurzel = app.querySelector('.kamera');
+    let pinchStart = null, pinchZoom = 1;
+    const abstand = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    wurzel.addEventListener('touchstart', e => {
+      if (e.touches.length === 2) { pinchStart = abstand(e.touches); pinchZoom = zoomFaktor; }
+    }, { passive: true });
+    wurzel.addEventListener('touchmove', e => {
+      if (e.touches.length === 2 && pinchStart && stream) {
+        e.preventDefault();
+        zoomFaktor = Math.min(zoomMax, Math.max(zoomMin, pinchZoom * abstand(e.touches) / pinchStart));
+        wendeZoomAn();
+      }
+    }, { passive: false });
+    wurzel.addEventListener('touchend', () => { pinchStart = null; }, { passive: true });
+    wurzel.addEventListener('wheel', e => {
+      if (!stream) return;
+      e.preventDefault();
+      zoomFaktor = Math.min(zoomMax, Math.max(zoomMin, zoomFaktor * (e.deltaY < 0 ? 1.1 : 0.9)));
+      wendeZoomAn();
+    }, { passive: false });
+    $('#ka-zoom').onclick = () => { zoomFaktor = zoomMin; wendeZoomAn(); };
+
+    try {
+      await starteStream(aktuelleDeviceId);
+      $('#ausloeser').onclick = () => {
+        if (!videoEl || !stream) return;
+        const vb = videoEl.videoWidth || 1280, vh = videoEl.videoHeight || 960;
+        let sx = 0, sy = 0, sw = vb, sh = vh;
+        if (zoomModus === 'digital' && zoomFaktor > 1.001) {
+          // Digital-Zoom: mittigen Bildausschnitt passend zum Vorschau-Zoom aufnehmen
+          sw = Math.max(1, Math.round(vb / zoomFaktor));
+          sh = Math.max(1, Math.round(vh / zoomFaktor));
+          sx = Math.round((vb - sw) / 2);
+          sy = Math.round((vh - sh) / 2);
+        }
+        const leinwand = document.createElement('canvas');
+        leinwand.width = sw;
+        leinwand.height = sh;
+        leinwand.getContext('2d').drawImage(videoEl, sx, sy, sw, sh, 0, 0, sw, sh);
+        leinwand.toBlob(blob => { if (blob) fotoAufgenommen(blob); }, 'image/jpeg', 0.9);
+      };
+    } catch (fehler) {
+      // Kein Live-Kamerazugriff → konkreten Grund anzeigen, Auslöser als Fallback
+      videoEl.remove();
+      videoEl = null;
+      const fallback = $('#ka-fallback');
+      $('#ausloeser').onclick = () => fallback.click();
+      fallback.onchange = () => { if (fallback.files[0]) fotoAufgenommen(fallback.files[0]); };
+      $('.kamera-top').insertAdjacentHTML('afterend',
+        `<div style="position:relative;text-align:center;padding:24px;color:#bbb;font-size:14px">${escapeHTML(kameraFehlerText(fehler))}<br>Der Auslöser öffnet Kamera-App bzw. Dateiauswahl, 🖼️ wählt eine Bilddatei.</div>`);
+    }
+  }
+
+  function fotoAufgenommen(blob) {
+    fotoBlob = blob;
+    fotoURL = URL.createObjectURL(blob);
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    phaseLabel();
+  }
+
+  function phaseLabel() {
+    labelText = '';
+    app.innerHTML = `
+      <div class="kamera">
+        <div class="kamera-scroll">
+          <img class="vorschau" src="${fotoURL}" alt="Aufgenommenes Foto">
+          <div class="mikro-bereich">
+            <span class="mikro puls" id="mikro">🎙️</span>
+            <div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:6px">Label jetzt einsprechen …</div>
+            <div class="live-text" id="live-text">…</div>
+          </div>
+          <button class="btn btn-primaer" id="ka-fertig">✓ Label fertig</button>
+        </div>
+      </div>`;
+
+    erkennung = erstelleErkennung(text => {
+      labelText = text;
+      const el = $('#live-text');
+      if (el) el.textContent = text || '…';
+    }, code => {
+      const el = $('#live-text');
+      if (el) el.textContent = erkennungsFehlerText(code);
+      const mikro = $('#mikro');
+      if (mikro) mikro.classList.remove('puls');
+    });
+    if (erkennung) {
+      erkennung.starten();
+    } else {
+      $('#mikro').classList.remove('puls');
+      $('#live-text').textContent = erkennungsFehlerText('nicht-vorhanden');
+    }
+    $('#ka-fertig').onclick = () => {
+      if (erkennung) { erkennung.stoppen(); erkennung = null; }
+      setTimeout(phaseBestaetigen, 250); // letzten Wörtern kurz Zeit geben
+    };
+  }
+
+  function phaseBestaetigen() {
+    app.innerHTML = `
+      <div class="kamera">
+        <div class="kamera-scroll">
+          <img class="vorschau" src="${fotoURL}" alt="Aufgenommenes Foto" style="max-height:36dvh">
+          <div class="beschriftung-dunkel">Label (editierbar)</div>
+          <input class="feld-dunkel" id="ka-label" value="${escapeHTML(labelText)}" placeholder="Label eingeben …">
+          <div class="datei-vorschau" id="ka-dateiname"></div>
+          ${labelText ? '' : '<div class="kamera-hinweis">Kein Sprach-Input erkannt — bitte Label eintippen.</div>'}
+          <div style="margin-top:18px">
+            <button class="btn btn-primaer" id="ka-weiter">📷 Speichern — nächstes Foto</button>
+            <button class="btn btn-sekundaer" id="ka-schliessen" style="background:rgba(255,255,255,0.14);color:#fff">Speichern &amp; Schließen</button>
+            <button class="btn btn-rot" id="ka-wiederholen">Foto wiederholen</button>
+          </div>
+        </div>
+      </div>`;
+
+    const eingabe = $('#ka-label');
+    const zeigeName = () => {
+      labelText = eingabe.value;
+      $('#ka-dateiname').textContent = 'Dateiname: ' + dateinameVorschau();
+    };
+    eingabe.oninput = zeigeName;
+    zeigeName();
+
+    async function speichern(weiter) {
+      const nr = naechsteNr();
+      const label = eingabe.value.trim();
+      const foto = {
+        id: crypto.randomUUID(),
+        laufendeNr: nr,
+        dateiname: dateinameVorschau(),
+        labelText: label || `Foto ${nr}`,
+        transkriptRoh: labelText.trim() || null,
+        aufgenommenAm: new Date().toISOString(),
+        gpsLat: koordinaten ? koordinaten.lat : null,
+        gpsLon: koordinaten ? koordinaten.lon : null
+      };
+      await medienSpeichern(foto.id, fotoBlob);
+      b.fotos.push(foto);
+      speichereDaten();
+      URL.revokeObjectURL(fotoURL);
+      fotoURL = null; fotoBlob = null;
+      if (weiter) phaseLive();
+      else navigiere({ name: 'detail', id: b.id });
+    }
+    $('#ka-weiter').onclick = () => speichern(true);
+    $('#ka-schliessen').onclick = () => speichern(false);
+    $('#ka-wiederholen').onclick = () => {
+      URL.revokeObjectURL(fotoURL); fotoURL = null; fotoBlob = null;
+      phaseLive();
+    };
+  }
+}
+
+// ---------- Screen 5: Sprachnotiz ----------
+
+function zeigeSprachnotiz(app, b) {
+  if (!b) return navigiere({ name: 'liste' });
+
+  let stream = null, rekorder = null, erkennung = null, timer = null;
+  let stuecke = [], startZeit = 0, dauer = 0, transkript = '';
+  let mime = '';
+
+  aufraeumFn = () => {
+    if (timer) clearInterval(timer);
+    if (rekorder && rekorder.state !== 'inactive') rekorder.stop();
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    if (erkennung) erkennung.stoppen();
+  };
+
+  phaseBereit();
+
+  function phaseBereit(hinweis) {
+    app.innerHTML = `
+      ${kopfzeile('Sprachnotiz', { name: 'detail', id: b.id })}
+      <div class="inhalt ohne-leiste zentriert" style="min-height:70dvh">
+        <div style="color:var(--sekundaer);font-size:15px;max-width:290px">Sprachnotiz zur Besichtigung aufnehmen — sie wird automatisch transkribiert.</div>
+        ${hinweis ? `<div style="color:var(--orange);font-size:13px">${escapeHTML(hinweis)}</div>` : ''}
+        <button class="aufnahme-knopf" id="s-start">🎙️</button>
+        <div style="color:var(--sekundaer);font-size:13px">Tippen zum Starten</div>
+      </div>`;
+    bindeZurueck({ name: 'detail', id: b.id });
+    $('#s-start').onclick = starteAufnahme;
+  }
+
+  async function starteAufnahme() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (_) {
+      return phaseBereit('Kein Mikrofon-Zugriff (HTTPS + Berechtigung nötig).');
+    }
+    mime = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm', '']
+      .find(m => m === '' || MediaRecorder.isTypeSupported(m));
+    stuecke = [];
+    rekorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+    rekorder.ondataavailable = e => { if (e.data.size) stuecke.push(e.data); };
+    rekorder.onstop = () => {
+      if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+      phaseBearbeiten();
+    };
+    rekorder.start();
+    startZeit = Date.now();
+
+    app.innerHTML = `
+      ${kopfzeile('Aufnahme läuft', null)}
+      <div class="inhalt ohne-leiste zentriert" style="min-height:70dvh">
+        <span class="mikro puls" style="font-size:40px">🎙️</span>
+        <div class="timer" id="s-timer">00:00</div>
+        <div id="s-live" style="min-height:64px;max-width:330px;font-size:15px;color:var(--sekundaer)">Transkript erscheint hier live …</div>
+        <button class="aufnahme-knopf" id="s-stopp"><span class="stopp"></span></button>
+        <div style="color:var(--sekundaer);font-size:13px">Tippen zum Stoppen</div>
+      </div>`;
+
+    transkript = '';
+    erkennung = erstelleErkennung(text => {
+      transkript = text;
+      const el = $('#s-live');
+      if (el) { el.textContent = text || 'Transkript erscheint hier live …'; el.style.color = 'var(--text)'; }
+    }, code => {
+      const el = $('#s-live');
+      if (el) { el.textContent = erkennungsFehlerText(code); el.style.color = 'var(--orange)'; }
+    });
+    if (erkennung) {
+      erkennung.starten();
+    } else {
+      $('#s-live').textContent = erkennungsFehlerText('nicht-vorhanden');
+      $('#s-live').style.color = 'var(--orange)';
+    }
+    timer = setInterval(() => {
+      $('#s-timer').textContent = formatDauer((Date.now() - startZeit) / 1000);
+    }, 250);
+    $('#s-stopp').onclick = () => {
+      dauer = (Date.now() - startZeit) / 1000;
+      clearInterval(timer); timer = null;
+      if (erkennung) { erkennung.stoppen(); }
+      rekorder.stop();
+    };
+  }
+
+  function phaseBearbeiten() {
+    setTimeout(() => {
+      app.innerHTML = `
+        ${kopfzeile('Sprachnotiz', null)}
+        <div class="inhalt ohne-leiste">
+          <div class="fussnote" style="margin:0 4px 8px">Aufnahme: ${formatDauer(dauer)} — Transkript (editierbar):</div>
+          <textarea class="transkript" id="s-text">${escapeHTML(transkript)}</textarea>
+          ${transkript ? '' : '<div class="fussnote" style="margin-top:8px;color:var(--orange)">Kein Text erkannt — bitte manuell eingeben (die Audiodatei bleibt als Beleg erhalten).</div>'}
+          <button class="btn btn-primaer" id="s-speichern" style="margin-top:14px">✓ Sprachnotiz speichern</button>
+          <button class="btn btn-rot" id="s-verwerfen">Verwerfen &amp; neu aufnehmen</button>
+        </div>`;
+      $('#s-speichern').onclick = async () => {
+        const blob = new Blob(stuecke, { type: mime || 'audio/webm' });
+        const endung = (mime && mime.startsWith('audio/mp4')) ? 'm4a' : 'webm';
+        let nr = b.sprachnotizen.length + 1;
+        let name = `sprachnotiz-${pad(nr)}.${endung}`;
+        while (b.sprachnotizen.some(n => n.dateiname === name)) {
+          nr++; name = `sprachnotiz-${pad(nr)}.${endung}`;
+        }
+        const notiz = {
+          id: crypto.randomUUID(),
+          dateiname: name,
+          transkript: $('#s-text').value.trim() || null,
+          dauer,
+          aufgenommenAm: new Date(startZeit).toISOString()
+        };
+        await medienSpeichern(notiz.id, blob);
+        b.sprachnotizen.push(notiz);
+        speichereDaten();
+        navigiere({ name: 'detail', id: b.id });
+      };
+      $('#s-verwerfen').onclick = () => { stuecke = []; transkript = ''; phaseBereit(); };
+    }, 300); // Erkennung kurz nachlaufen lassen
+  }
+}
+
+// ---------- Screen 6a: Foto-Detail ----------
+
+function zeigeFotoDetail(app, b, fotoId) {
+  if (!b) return navigiere({ name: 'liste' });
+  const foto = b.fotos.find(f => f.id === fotoId);
+  if (!foto) return navigiere({ name: 'detail', id: b.id });
+
+  app.innerHTML = `
+    ${kopfzeile(`Foto ${foto.laufendeNr}`, { name: 'detail', id: b.id }, '<button class="rechts" id="fd-loeschen" style="color:var(--rot)">Löschen</button>')}
+    <div class="inhalt ohne-leiste">
+      <img class="grossbild" data-medien="${foto.id}" alt="">
+      <div class="feldgruppe" style="margin-top:14px">
+        <label>Label (editierbar)</label>
+        <input id="fd-label" value="${escapeHTML(foto.labelText)}">
+      </div>
+      <button class="btn btn-primaer" id="fd-speichern" hidden>✓ Label speichern</button>
+      <div class="metabox">
+        <div class="m-zeile"><b>Dateiname</b><span id="fd-dateiname">${escapeHTML(foto.dateiname)}</span></div>
+        <div class="m-zeile"><b>Aufgenommen</b><span>${formatDatumZeit(foto.aufgenommenAm)}</span></div>
+        <div class="m-zeile"><b>GPS</b><span>${gpsText(foto.gpsLat, foto.gpsLon) || 'nicht verfügbar'}</span></div>
+        ${foto.transkriptRoh ? `<div class="m-zeile"><b>Transkript (roh)</b><span>${escapeHTML(foto.transkriptRoh)}</span></div>` : ''}
+      </div>
+    </div>`;
+
+  bindeZurueck({ name: 'detail', id: b.id });
+  ladeMiniaturen(app);
+
+  const eingabe = $('#fd-label');
+  eingabe.oninput = () => {
+    $('#fd-speichern').hidden = eingabe.value.trim() === foto.labelText;
+  };
+  $('#fd-speichern').onclick = () => {
+    const label = eingabe.value.trim();
+    foto.labelText = label || `Foto ${foto.laufendeNr}`;
+    let slug = slugErzeugen(label || `foto-${foto.laufendeNr}`) || `foto-${foto.laufendeNr}`;
+    const andere = new Set(b.fotos.filter(f => f.id !== foto.id).map(f => slugAusDateiname(f.dateiname)));
+    foto.dateiname = `${pad(foto.laufendeNr, 3)}_${slugEindeutig(slug, andere)}.jpg`;
+    speichereDaten();
+    $('#fd-dateiname').textContent = foto.dateiname;
+    $('#fd-speichern').hidden = true;
+  };
+  $('#fd-loeschen').onclick = () => {
+    if (!confirm('Foto endgültig löschen?')) return;
+    medienLoeschen(foto.id);
+    b.fotos = b.fotos.filter(f => f.id !== foto.id);
+    speichereDaten();
+    navigiere({ name: 'detail', id: b.id });
+  };
+}
+
+// ---------- Screen 6b: Sprachnotiz-Detail ----------
+
+function zeigeNotizDetail(app, b, notizId) {
+  if (!b) return navigiere({ name: 'liste' });
+  const notiz = b.sprachnotizen.find(n => n.id === notizId);
+  if (!notiz) return navigiere({ name: 'detail', id: b.id });
+
+  app.innerHTML = `
+    ${kopfzeile('Sprachnotiz', { name: 'detail', id: b.id }, '<button class="rechts" id="nd-loeschen" style="color:var(--rot)">Löschen</button>')}
+    <div class="inhalt ohne-leiste">
+      <div class="metabox" style="margin-top:0">
+        <div class="m-zeile"><b>Datei</b><span>${escapeHTML(notiz.dateiname)}</span></div>
+        <div class="m-zeile"><b>Aufgenommen</b><span>${formatDauer(notiz.dauer)} · ${formatDatumZeit(notiz.aufgenommenAm)}</span></div>
+        <audio controls id="nd-audio"></audio>
+      </div>
+      <div class="sektion-titel">Transkript (editierbar)</div>
+      <textarea class="transkript" id="nd-text">${escapeHTML(notiz.transkript || '')}</textarea>
+      <button class="btn btn-primaer" id="nd-speichern" hidden style="margin-top:12px">✓ Transkript speichern</button>
+    </div>`;
+
+  bindeZurueck({ name: 'detail', id: b.id });
+  medienURL(notiz.id).then(url => { if (url) $('#nd-audio').src = url; });
+
+  const feld = $('#nd-text');
+  feld.oninput = () => {
+    $('#nd-speichern').hidden = feld.value.trim() === (notiz.transkript || '');
+  };
+  $('#nd-speichern').onclick = () => {
+    notiz.transkript = feld.value.trim() || null;
+    speichereDaten();
+    $('#nd-speichern').hidden = true;
+  };
+  $('#nd-loeschen').onclick = () => {
+    if (!confirm('Sprachnotiz endgültig löschen?')) return;
+    medienLoeschen(notiz.id);
+    b.sprachnotizen = b.sprachnotizen.filter(n => n.id !== notiz.id);
+    speichereDaten();
+    navigiere({ name: 'detail', id: b.id });
+  };
+}
+
+// ---------- Screen 8: Einstellungen ----------
+
+function zeigeEinstellungen(app) {
+  const audioAn = einstellung('audioMitExportieren', true);
+  app.innerHTML = `
+    ${kopfzeile('Einstellungen', { name: 'liste' })}
+    <div class="inhalt ohne-leiste">
+      <div class="schalter-zeile">
+        <span>Audiodateien mitexportieren</span>
+        <input type="checkbox" id="e-audio" ${audioAn ? 'checked' : ''}>
+      </div>
+      <div class="fussnote" style="margin-top:8px">Wenn aktiv, enthält das Export-ZIP zusätzlich die Audiodateien als Fallback bei fehlerhaften Transkripten.</div>
+      <div class="sektion-titel">KI-Protokoll</div>
+      <div class="feldgruppe" style="margin-bottom:10px">
+        <label>Anthropic API-Key</label>
+        <input id="e-key" type="password" placeholder="sk-ant-…" autocomplete="off"
+               value="${escapeHTML(localStorage.getItem('anthropicApiKey') || '')}">
+      </div>
+      <div class="schalter-zeile">
+        <span>Fotos mitanalysieren</span>
+        <input type="checkbox" id="e-fotos" ${einstellung('fotosAnalysieren', true) ? 'checked' : ''}>
+      </div>
+      <div class="fussnote" style="margin-top:8px">Der Key wird nur lokal auf diesem Gerät gespeichert und direkt an die Anthropic-API gesendet — er landet nie auf einem anderen Server. Empfehlung: eigener Workspace mit Ausgabenlimit (console.anthropic.com). „Fotos mitanalysieren" ergänzt im Protokoll „aus Foto erkennbar…"-Feststellungen.</div>
+      <div class="sektion-titel">Über diesen Prototyp</div>
+      <div class="metabox" style="margin-top:0">
+        <div class="m-zeile">Dies ist eine Web-Demo der geplanten iOS-App. Unterschiede zur echten App:</div>
+        <div class="m-zeile" style="font-size:13px;color:var(--sekundaer)">
+          · Spracherkennung läuft über den Browser (Internet nötig), in der App on-device und offline<br>
+          · Daten liegen im Browser-Speicher, in der App dauerhaft und robust auf dem Gerät<br>
+          · Der Export (protokoll-rohdaten.md, manifest.json, Fotos, Audio) entspricht bereits dem echten Format
+        </div>
+      </div>
+    </div>`;
+  bindeZurueck({ name: 'liste' });
+  $('#e-audio').onchange = ev => localStorage.setItem('audioMitExportieren', ev.target.checked ? '1' : '0');
+  $('#e-fotos').onchange = ev => localStorage.setItem('fotosAnalysieren', ev.target.checked ? '1' : '0');
+  $('#e-key').onchange = ev => {
+    const wert = ev.target.value.trim();
+    if (wert) localStorage.setItem('anthropicApiKey', wert);
+    else localStorage.removeItem('anthropicApiKey');
+  };
+}
+
+// ---------- Export (Spec §7.4) ----------
+
+/* System-Prompt der Protokollerzeugung — genutzt von der In-App-Generierung
+   (KI-Protokoll) und, mit Anleitungs-Kopf, als protokoll-prompt.txt im Export. */
+const PROTOKOLL_SYSTEM = `Du bist Assistent eines Baugutachters. Beigefügt sind die Rohdaten einer
+Gebäudebesichtigung (protokoll-rohdaten.md) — chronologische Foto-Labels mit
+GPS-Koordinaten und transkribierte Sprachnotizen — sowie ggf. die Fotos selbst.
+
+Erstelle daraus ein professionelles Besichtigungsprotokoll in deutscher Sprache.
+
+ZWECK
+Das Protokoll dokumentiert wertrelevante Feststellungen am Gebäude
+(Zustand, Mängel, Ausstattung, bauliche Details) als Grundlage für eine
+spätere Schätzung des Gebäudewerts.
+
+VORGEHEN
+1. Gruppiere Fotos und Sprachnotizen thematisch (z. B. nach Geschoss/Raum/
+   Bauteil), erkennbar aus Labels, Transkripten und zeitlicher Abfolge.
+2. Verknüpfe jede Feststellung mit den zugehörigen Foto-Dateinamen als
+   Beleg-Referenz, z. B. (Foto: 002_rueckraum-hinten.jpg).
+3. Unterscheide klar zwischen dokumentierten Beobachtungen (aus den Rohdaten)
+   und deiner Einordnung (als solche kennzeichnen). Erfinde keine
+   Feststellungen, die nicht in den Rohdaten stehen.
+4. Korrigiere offensichtliche Spracherkennungs-Verwechslungen aus dem Kontext
+   und kennzeichne sie als [erkannt: X, vermutlich gemeint: Y].
+5. Markiere typischerweise wertrelevante Feststellungen (Feuchteschäden,
+   Modernisierungsstand, Bauteilzustand) in einer eigenen Zusammenfassung —
+   ohne selbst einen Wert zu schätzen.
+
+STRUKTUR
+1. Kopfdaten (Objekt, Adresse, Datum, Bearbeiter)
+2. Zusammenfassung der wesentlichen Feststellungen
+3. Feststellungen im Detail (thematisch gegliedert, mit Foto-Referenzen)
+4. Auffälligkeiten / potenziell wertrelevante Punkte
+5. Offene Punkte / empfohlene Nachprüfungen
+6. Anlagenverzeichnis (alle Fotos mit Label und ggf. GPS)
+
+FORMAT
+Sachlicher Gutachter-Ton, vollständige Sätze. Lücken oder unklare
+Transkripte als [unklar: …] kennzeichnen statt raten.`;
+
+/* Liegt jedem Export bei, damit das Paket selbsterklärend ist. */
+const PROTOKOLL_PROMPT = `ANLEITUNG: Diese Datei zusammen mit protokoll-rohdaten.md
+(und optional den Fotos aus fotos/) in claude.ai hochladen bzw. einfügen.
+
+---
+
+` + PROTOKOLL_SYSTEM;
+
+function erzeugeProtokollRohdaten(b, fotos, notizen) {
+  let md = `# Besichtigung: ${b.titel}\n`;
+  md += `- Adresse: ${b.adresse || '—'}\n`;
+  md += `- Erstellt: ${formatDatumZeit(b.erstelltAm)}\n`;
+  md += `- Abgeschlossen: ${b.abgeschlossenAm ? formatDatumZeit(b.abgeschlossenAm) : '—'}\n`;
+  md += `- Freitextnotiz: ${b.freitextNotiz || '—'}\n`;
+  md += `\n## Fotos (chronologisch)\n`;
+  if (!fotos.length) md += '_keine Fotos erfasst_\n';
+  fotos.forEach((f, i) => {
+    md += `${i + 1}. [${f.dateiname}] Label: "${f.labelText}" — aufgenommen ${formatZeit(f.aufgenommenAm)} — GPS: ${gpsText(f.gpsLat, f.gpsLon) || 'nicht verfügbar'}\n`;
+  });
+  md += `\n## Sprachnotizen (chronologisch, transkribiert)\n`;
+  if (!notizen.length) md += '_keine Sprachnotizen erfasst_\n';
+  notizen.forEach((n, i) => {
+    md += `${i + 1}. (${formatDauer(n.dauer)}, aufgenommen ${formatZeit(n.aufgenommenAm)})\n`;
+    md += `   "${n.transkript || `[kein Transkript vorhanden — siehe Audiodatei ${n.dateiname}]`}"\n`;
+  });
+  return md;
+}
+
+async function exportiere(b) {
+  const ueberzug = document.createElement('div');
+  ueberzug.className = 'ueberzug';
+  ueberzug.innerHTML = '<div class="box">Export-Paket wird erstellt …</div>';
+  document.body.appendChild(ueberzug);
+
+  try {
+    const audioAn = einstellung('audioMitExportieren', true);
+    const fotos = [...b.fotos].sort((a, c) => a.aufgenommenAm < c.aufgenommenAm ? -1 : 1);
+    const notizen = [...b.sprachnotizen].sort((a, c) => a.aufgenommenAm < c.aufgenommenAm ? -1 : 1);
+    const encoder = new TextEncoder();
+    const basis = `Besichtigung_${slugErzeugen(b.titel) || 'export'}_${isoDatum(b.erstelltAm)}`;
+
+    const eintraege = [
+      { name: `${basis}/protokoll-rohdaten.md`, daten: encoder.encode(erzeugeProtokollRohdaten(b, fotos, notizen)) },
+      { name: `${basis}/protokoll-prompt.txt`, daten: encoder.encode(PROTOKOLL_PROMPT) },
+      ...(b.protokoll && b.protokoll.text
+        ? [{ name: `${basis}/protokoll.md`, daten: encoder.encode(b.protokoll.text) }]
+        : []),
+      {
+        name: `${basis}/manifest.json`,
+        daten: encoder.encode(JSON.stringify({
+          titel: b.titel, adresse: b.adresse, erstelltAm: b.erstelltAm,
+          abgeschlossenAm: b.abgeschlossenAm, freitextNotiz: b.freitextNotiz,
+          exportiertAm: new Date().toISOString(),
+          audioEnthalten: audioAn && notizen.length > 0,
+          fotos: fotos.map(f => ({
+            laufendeNr: f.laufendeNr, dateiname: f.dateiname, label: f.labelText,
+            transkriptRoh: f.transkriptRoh, aufgenommenAm: f.aufgenommenAm,
+            gpsLat: f.gpsLat, gpsLon: f.gpsLon
+          })),
+          sprachnotizen: notizen.map(n => ({
+            dateiname: n.dateiname, transkript: n.transkript,
+            dauerSekunden: n.dauer, aufgenommenAm: n.aufgenommenAm
+          }))
+        }, null, 2))
+      }
+    ];
+
+    for (const f of fotos) {
+      const blob = await medienLaden(f.id);
+      if (blob) eintraege.push({ name: `${basis}/fotos/${f.dateiname}`, daten: new Uint8Array(await blob.arrayBuffer()) });
+    }
+    if (audioAn) {
+      for (const n of notizen) {
+        const blob = await medienLaden(n.id);
+        if (blob) eintraege.push({ name: `${basis}/sprachnotizen/${n.dateiname}`, daten: new Uint8Array(await blob.arrayBuffer()) });
+      }
+    }
+
+    const zipBlob = zipErstellen(eintraege);
+    const datei = new File([zipBlob], `${basis}.zip`, { type: 'application/zip' });
+
+    // iOS-Share-Sheet wie in der echten App (AirDrop, „In Dateien sichern" …), sonst Download
+    if (navigator.canShare && navigator.canShare({ files: [datei] })) {
+      try {
+        await navigator.share({ files: [datei], title: b.titel });
+        return;
+      } catch (fehler) {
+        if (fehler && fehler.name === 'AbortError') return; // Nutzer hat abgebrochen
+      }
+    }
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${basis}.zip`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (fehler) {
+    alert('Export fehlgeschlagen: ' + fehler.message);
+  } finally {
+    ueberzug.remove();
+  }
+}
+
+// ---------- KI-Protokoll (docs/KONZEPT-PWA-PROTOKOLL.md) ----------
+
+/** Verkleinert ein Foto auf maxKante Pixel und liefert Base64-JPEG (ohne data:-Präfix). */
+async function verkleinereBild(blob, maxKante) {
+  const bild = await new Promise((ok, nein) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); ok(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); nein(new Error('Bild nicht lesbar')); };
+    img.src = url;
+  });
+  const faktor = Math.min(1, maxKante / Math.max(bild.width, bild.height));
+  const leinwand = document.createElement('canvas');
+  leinwand.width = Math.max(1, Math.round(bild.width * faktor));
+  leinwand.height = Math.max(1, Math.round(bild.height * faktor));
+  leinwand.getContext('2d').drawImage(bild, 0, 0, leinwand.width, leinwand.height);
+  return leinwand.toDataURL('image/jpeg', 0.8).split(',')[1];
+}
+
+/** Ruft die Claude API direkt aus dem Browser auf (SSE-Streaming) und liefert den Protokolltext. */
+async function rufeClaudeAuf(b, mitFotos, signal, aufText) {
+  const schluessel = localStorage.getItem('anthropicApiKey');
+  const fotos = [...b.fotos].sort((a, c) => a.aufgenommenAm < c.aufgenommenAm ? -1 : 1);
+  const notizen = [...b.sprachnotizen].sort((a, c) => a.aufgenommenAm < c.aufgenommenAm ? -1 : 1);
+  const rohdaten = erzeugeProtokollRohdaten(b, fotos, notizen);
+
+  const inhalte = [];
+  if (mitFotos) {
+    for (const foto of fotos) {
+      const blob = await medienLaden(foto.id);
+      if (!blob) continue;
+      try {
+        inhalte.push({
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: await verkleinereBild(blob, 1024) }
+        });
+      } catch (_) { /* einzelnes defektes Bild überspringen */ }
+    }
+  }
+  inhalte.push({
+    type: 'text',
+    text: 'Anbei die Rohdaten der Besichtigung (protokoll-rohdaten.md).' +
+      (mitFotos && inhalte.length ? ' Die vorangestellten Bilder sind die referenzierten Fotos in chronologischer Reihenfolge (gleiche Reihenfolge wie die Fotoliste).' : '') +
+      '\n\n' + rohdaten
+  });
+
+  const antwort = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    signal,
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': schluessel,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-opus-4-8',
+      max_tokens: 16000,
+      stream: true,
+      thinking: { type: 'adaptive' },
+      system: PROTOKOLL_SYSTEM,
+      messages: [{ role: 'user', content: inhalte }]
+    })
+  });
+
+  if (!antwort.ok) {
+    let detail = '';
+    try { detail = (await antwort.json()).error?.message || ''; } catch (_) {}
+    const fehler = new Error(detail || 'HTTP ' + antwort.status);
+    fehler.status = antwort.status;
+    throw fehler;
+  }
+
+  // SSE-Stream lesen: text_delta-Ereignisse akkumulieren
+  const leser = antwort.body.getReader();
+  const dekoder = new TextDecoder();
+  let puffer = '', text = '';
+  while (true) {
+    const { done, value } = await leser.read();
+    if (done) break;
+    puffer += dekoder.decode(value, { stream: true });
+    const zeilen = puffer.split('\n');
+    puffer = zeilen.pop();
+    for (const zeile of zeilen) {
+      if (!zeile.startsWith('data: ')) continue;
+      let ereignis;
+      try { ereignis = JSON.parse(zeile.slice(6)); } catch (_) { continue; }
+      if (ereignis.type === 'content_block_delta' && ereignis.delta && ereignis.delta.type === 'text_delta') {
+        text += ereignis.delta.text;
+        aufText(text);
+      } else if (ereignis.type === 'error') {
+        throw new Error((ereignis.error && ereignis.error.message) || 'Stream-Fehler');
+      }
+    }
+  }
+  if (!text.trim()) throw new Error('Leere Antwort erhalten — bitte erneut versuchen.');
+  return text;
+}
+
+/** Minimaler Markdown-Renderer für die Protokoll-Anzeige (Überschriften, Listen, Fett). */
+function mdZuHtml(md) {
+  let html = '', listeOffen = false, absatz = [];
+  const inline = t => escapeHTML(t).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  const schliesseAbsatz = () => { if (absatz.length) { html += '<p>' + absatz.join('<br>') + '</p>'; absatz = []; } };
+  const schliesseListe = () => { if (listeOffen) { html += '</ul>'; listeOffen = false; } };
+  for (const zeile of md.split('\n')) {
+    const t = zeile.trim();
+    if (!t) { schliesseAbsatz(); schliesseListe(); continue; }
+    const ueberschrift = t.match(/^(#{1,4})\s+(.*)/);
+    if (ueberschrift) {
+      schliesseAbsatz(); schliesseListe();
+      const stufe = Math.min(ueberschrift[1].length + 1, 5);
+      html += `<h${stufe}>${inline(ueberschrift[2])}</h${stufe}>`;
+      continue;
+    }
+    const punkt = t.match(/^[-*•]\s+(.*)/) || t.match(/^\d+[.)]\s+(.*)/);
+    if (punkt) {
+      schliesseAbsatz();
+      if (!listeOffen) { html += '<ul>'; listeOffen = true; }
+      html += '<li>' + inline(punkt[1]) + '</li>';
+      continue;
+    }
+    schliesseListe();
+    absatz.push(inline(t));
+  }
+  schliesseAbsatz(); schliesseListe();
+  return html;
+}
+
+/** Bereich „KI-Protokoll" im Detail-Screen (nur bei abgeschlossener Besichtigung). */
+function kiProtokollSektion(b) {
+  const online = navigator.onLine;
+  const vorhanden = b.protokoll && b.protokoll.text;
+  return `
+    <div class="sektion-titel">KI-Protokoll</div>
+    <div class="karte" style="cursor:default">
+      ${vorhanden ? `
+        <div class="unterzeile" style="margin-bottom:10px">Erstellt am ${formatDatumZeit(b.protokoll.erstelltAm)}${b.protokoll.mitFotos ? ' · mit Foto-Analyse' : ''}</div>
+        <button class="btn btn-primaer btn-klein" id="d-prot-anzeigen">Protokoll anzeigen</button>
+        <button class="btn btn-sekundaer btn-klein" id="d-prot-neu" ${online ? '' : 'disabled'} style="margin-bottom:0">Neu erstellen</button>`
+      : `
+        <div class="unterzeile" style="margin-bottom:10px">Erzeugt per Claude ein Besichtigungsprotokoll aus den Rohdaten${einstellung('fotosAnalysieren', true) && b.fotos.length ? ' und Fotos' : ''}.</div>
+        <button class="btn btn-primaer btn-klein" id="d-prot-erstellen" ${online ? '' : 'disabled'} style="margin-bottom:0">✨ KI-Protokoll erstellen</button>`}
+      ${online ? '' : '<div class="fussnote" style="margin:10px 0 0">Offline — die Protokollerzeugung braucht Internet.</div>'}
+    </div>`;
+}
+
+/** Einstieg vom Detail-Screen: Key prüfen, Erstnutzungs-Hinweis, dann Erzeugung starten. */
+function starteKiProtokoll(b) {
+  if (!localStorage.getItem('anthropicApiKey')) {
+    alert('Bitte zuerst den Anthropic API-Key in den Einstellungen hinterlegen.');
+    navigiere({ name: 'einstellungen' });
+    return;
+  }
+  if (!localStorage.getItem('protokollHinweisOk')) {
+    const mitFotos = einstellung('fotosAnalysieren', true) && b.fotos.length > 0;
+    if (!confirm('Zur Protokollerzeugung werden die Transkripte' + (mitFotos ? ' und Fotos' : '') +
+      ' dieser Besichtigung an Anthropic (Claude API) übertragen. Fortfahren?')) return;
+    localStorage.setItem('protokollHinweisOk', '1');
+  }
+  navigiere({ name: 'protokoll', id: b.id, neu: true });
+}
+
+// ---------- Screen: KI-Protokoll ----------
+
+function zeigeProtokoll(app, b) {
+  if (!b) return navigiere({ name: 'liste' });
+  const neuErzeugen = route.neu === true;
+  route.neu = false;
+
+  app.innerHTML = `
+    ${kopfzeile('KI-Protokoll', { name: 'detail', id: b.id })}
+    <div class="inhalt ohne-leiste">
+      <div class="fussnote" id="prot-status" style="margin:0 4px 10px"></div>
+      <div class="protokoll-text" id="prot-inhalt"></div>
+      <div id="prot-aktionen" hidden style="margin-top:14px">
+        <button class="btn btn-primaer btn-klein" id="prot-teilen">Teilen / Sichern (.md)</button>
+        <button class="btn btn-sekundaer btn-klein" id="prot-kopieren">Kopieren</button>
+        <button class="btn btn-sekundaer btn-klein" id="prot-drucken">Drucken / PDF</button>
+        <button class="btn btn-rot" id="prot-neu">Neu erstellen</button>
+      </div>
+    </div>`;
+  bindeZurueck({ name: 'detail', id: b.id });
+
+  const statusEl = $('#prot-status');
+  const inhaltEl = $('#prot-inhalt');
+
+  function zeigeFertig() {
+    statusEl.textContent = 'Erstellt am ' + formatDatumZeit(b.protokoll.erstelltAm) +
+      (b.protokoll.mitFotos ? ' · mit Foto-Analyse' : '');
+    inhaltEl.innerHTML = mdZuHtml(b.protokoll.text);
+    $('#prot-aktionen').hidden = false;
+    $('#prot-kopieren').onclick = async () => {
+      try { await navigator.clipboard.writeText(b.protokoll.text); alert('Protokoll kopiert.'); }
+      catch (_) { alert('Kopieren nicht möglich.'); }
+    };
+    $('#prot-teilen').onclick = async () => {
+      const name = `protokoll_${slugErzeugen(b.titel) || 'besichtigung'}.md`;
+      const datei = new File([b.protokoll.text], name, { type: 'text/markdown' });
+      if (navigator.canShare && navigator.canShare({ files: [datei] })) {
+        try { await navigator.share({ files: [datei], title: 'Besichtigungsprotokoll' }); return; }
+        catch (f) { if (f && f.name === 'AbortError') return; }
+      }
+      const url = URL.createObjectURL(datei);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    };
+    $('#prot-drucken').onclick = () => window.print();
+    $('#prot-neu').onclick = () => {
+      if (confirm('Vorhandenes Protokoll verwerfen und neu erstellen?')) {
+        navigiere({ name: 'protokoll', id: b.id, neu: true });
+      }
+    };
+  }
+
+  async function erzeuge(versuch) {
+    const steuerung = new AbortController();
+    aufraeumFn = () => steuerung.abort();
+    statusEl.textContent = '⏳ Protokoll wird erstellt — der Text läuft live ein …';
+    inhaltEl.textContent = '';
+    $('#prot-aktionen').hidden = true;
+    const mitFotos = einstellung('fotosAnalysieren', true) && b.fotos.length > 0;
+    try {
+      const text = await rufeClaudeAuf(b, mitFotos, steuerung.signal, laufend => {
+        inhaltEl.textContent = laufend;
+      });
+      b.protokoll = { text, erstelltAm: new Date().toISOString(), mitFotos };
+      speichereDaten();
+      zeigeFertig();
+    } catch (fehler) {
+      if (fehler.name === 'AbortError') return;
+      if ((fehler.status === 429 || fehler.status === 529) && versuch === 1) {
+        statusEl.textContent = 'API ausgelastet — neuer Versuch in 5 Sekunden …';
+        setTimeout(() => erzeuge(2), 5000);
+        return;
+      }
+      const meldung = fehler.status === 401
+        ? 'API-Key ungültig — bitte in den Einstellungen prüfen.'
+        : 'Fehler: ' + fehler.message;
+      statusEl.textContent = '';
+      inhaltEl.innerHTML = `<div style="color:var(--rot)">${escapeHTML(meldung)}</div>
+        <button class="btn btn-sekundaer btn-klein" id="prot-retry" style="margin-top:12px">Erneut versuchen</button>`;
+      $('#prot-retry').onclick = () => erzeuge(1);
+    }
+  }
+
+  if (neuErzeugen || !b.protokoll) erzeuge(1);
+  else zeigeFertig();
+}
+
+// ---------- Start ----------
+render();
+
+// PWA: Service Worker für Offline-Start registrieren (HTTPS oder localhost)
+if ('serviceWorker' in navigator &&
+    (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
