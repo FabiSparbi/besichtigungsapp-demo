@@ -2,10 +2,22 @@
    Strategie: Netzwerk zuerst (damit Updates sofort ankommen),
    Cache als Fallback (damit die App offline startet).
    Update-Ablauf: neuer Worker wartet, bis die Seite per
-   SKIP_WAITING-Nachricht zustimmt (Update-Banner in index.html). */
+   SKIP_WAITING-Nachricht zustimmt (Update-Banner in app.js).
 
-const CACHE = 'baugutassist-v7';
+   APP_SHELL muss jede Datei nennen, die die App zum Starten braucht —
+   seit dem Modul-Refactoring gehören alle js/-Module dazu. Fehlt eines,
+   startet die App offline nicht mehr. Das Deploy-Skript warnt, wenn
+   APP_SHELL und die Veröffentlichungsliste auseinanderlaufen. */
+
+const CACHE = 'baugutassist-v8';
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest',
+  './css/app.css', './app.js',
+  './js/hilfen.js', './js/zip.js', './js/speicher.js', './js/medien.js',
+  './js/router.js', './js/ki.js', './js/backup.js',
+  './js/screens/liste.js', './js/screens/neu.js', './js/screens/detail.js',
+  './js/screens/kamera.js', './js/screens/sprachnotiz.js',
+  './js/screens/fotoDetail.js', './js/screens/notizDetail.js',
+  './js/screens/einstellungen.js', './js/screens/protokoll.js',
   './icon-192.png', './icon-512.png', './apple-touch-icon.png',
   './icon-192-dark.png', './icon-512-dark.png'];
 
