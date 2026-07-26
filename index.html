@@ -171,8 +171,10 @@
     border: 5px solid #fff; background: rgba(255,255,255,0.25); position: relative;
   }
   .ausloeser::after { content: ""; position: absolute; inset: 6px; border-radius: 50%; background: #fff; }
-  /* Querformat: Bedienelemente an den rechten Rand, damit sie das breite Bild nicht überdecken */
-  @media (orientation: landscape) {
+  /* Querformat am Handy: Bedienelemente an den rechten Rand, damit sie das
+     breite Bild nicht überdecken. Die Höhengrenze passt zur Desktop-Regel
+     unten — im zentrierten Desktop-Fenster ist die Kamera-Spalte hochkant. */
+  @media (orientation: landscape) and (max-height: 599px) {
     .kamera-top { padding: calc(env(safe-area-inset-top) + 10px)
       calc(env(safe-area-inset-right) + 96px) 10px calc(env(safe-area-inset-left) + 12px); }
     .kamera-unten { position: absolute; top: 0; right: 0; bottom: 0;
@@ -268,8 +270,11 @@
 
   /* Desktop: App-Spalte samt fixierter Overlays (Kamera, Aktionsleiste,
      Export-Overlay) zentriert in iPhone-Breite. Steht bewusst am Ende,
-     damit es die Basisregeln (left/right/inset) sicher überschreibt. */
-  @media (min-width: 431px) {
+     damit es die Basisregeln (left/right/inset) sicher überschreibt.
+     Die Mindesthöhe grenzt echte Desktop-Fenster gegen ein quer gehaltenes
+     iPhone ab — das ist zwar breiter als 430px, aber nur ~390-430px hoch
+     und soll die Kamera über den ganzen Bildschirm zeigen. */
+  @media (min-width: 431px) and (min-height: 600px) {
     body { background: #e2e2e8; }
     #app { background: var(--bg); box-shadow: 0 0 24px rgba(0,0,0,0.12); }
     .kamera, .ueberzug, .aktionsleiste {
