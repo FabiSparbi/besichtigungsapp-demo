@@ -8,7 +8,11 @@
 <meta name="theme-color" content="#f2f2f7">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>Besichtigung (Prototyp)</title>
+<!-- Tab-Icon folgt dem Systemdesign; iOS nutzt fürs Home-Bildschirm-Icon
+     ausschließlich apple-touch-icon.png (kein Dark-Mode-Wechsel möglich). -->
+<link rel="icon" href="icon-192.png" media="(prefers-color-scheme: light)">
+<link rel="icon" href="icon-192-dark.png" media="(prefers-color-scheme: dark)">
+<title>BaugutAssist</title>
 <style>
   :root {
     --bg: #f2f2f7;

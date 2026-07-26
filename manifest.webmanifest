@@ -1,7 +1,7 @@
 {
-  "name": "Besichtigung (Demo)",
-  "short_name": "Besichtigung",
-  "description": "Demo der Besichtigungs-Erfassungs-App: Fotos mit gesprochenem Label, Sprachnotizen mit Transkript, Export als ZIP.",
+  "name": "BaugutAssist",
+  "short_name": "BaugutAssist",
+  "description": "Besichtigungen erfassen: Fotos mit gesprochenem Label, Sprachnotizen mit Transkript, Export als ZIP und KI-Protokoll.",
   "lang": "de",
   "start_url": ".",
   "scope": ".",
@@ -10,7 +10,9 @@
   "background_color": "#f2f2f7",
   "theme_color": "#f2f2f7",
   "icons": [
-    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

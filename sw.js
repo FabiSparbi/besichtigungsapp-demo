@@ -4,8 +4,10 @@
    Update-Ablauf: neuer Worker wartet, bis die Seite per
    SKIP_WAITING-Nachricht zustimmt (Update-Banner in index.html). */
 
-const CACHE = 'besichtigung-demo-v4';
-const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
+const CACHE = 'baugutassist-v5';
+const APP_SHELL = ['./', './index.html', './manifest.webmanifest',
+  './icon-192.png', './icon-512.png', './apple-touch-icon.png',
+  './icon-192-dark.png', './icon-512-dark.png'];
 
 self.addEventListener('install', ereignis => {
   // Kein skipWaiting hier — die Seite entscheidet über den Zeitpunkt (Update-Banner).
