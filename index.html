@@ -34,6 +34,8 @@
     width: 100%; max-width: 430px; margin: 0 auto; }
   /* Desktop-Zentrierung: weitere Regeln am Ende des Stylesheets
      (müssen NACH den Basisregeln stehen, um left/right zu überschreiben) */
+  /* Das hidden-Attribut muss auch gegen display:flex-Regeln (.btn) gewinnen */
+  [hidden] { display: none !important; }
 
   /* Kopfzeile */
   .kopf {
@@ -257,6 +259,20 @@
       transform: translateX(-50%);
     }
   }
+
+  /* Update-Banner (neue Service-Worker-Version verfügbar) */
+  .update-banner {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom) + 14px); z-index: 40;
+    display: flex; align-items: center; gap: 12px;
+    background: #1c1c1e; color: #fff; font-size: 14px;
+    padding: 10px 12px 10px 16px; border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.25); max-width: 92%;
+  }
+  .update-banner button {
+    border: none; border-radius: 8px; background: var(--akzent); color: #fff;
+    font-size: 14px; font-weight: 600; padding: 8px 12px; cursor: pointer; white-space: nowrap;
+  }
 </style>
 </head>
 <body>
@@ -281,6 +297,19 @@ function escapeHTML(s) {
 }
 
 const pad = (n, l = 2) => String(n).padStart(l, '0');
+
+/** Kurze „Gespeichert"-Bestätigung unter einem Element einblenden. */
+function zeigeGespeichert(nachElement) {
+  if (!nachElement) return;
+  const alt = document.getElementById('speicher-hinweis');
+  if (alt) alt.remove();
+  const el = document.createElement('div');
+  el.id = 'speicher-hinweis';
+  el.textContent = '✓ Gespeichert';
+  el.style.cssText = 'color:var(--gruen);font-size:14px;font-weight:600;margin:6px 4px 10px';
+  nachElement.insertAdjacentElement('afterend', el);
+  setTimeout(() => el.remove(), 2000);
+}
 
 function formatDatum(iso) {
   const d = new Date(iso);
@@ -338,7 +367,13 @@ function slugAusDateiname(name) {
 
 let besichtigungen = JSON.parse(localStorage.getItem('besichtigungen') || '[]');
 function speichereDaten() {
-  localStorage.setItem('besichtigungen', JSON.stringify(besichtigungen));
+  try {
+    localStorage.setItem('besichtigungen', JSON.stringify(besichtigungen));
+  } catch (fehler) {
+    // Voller Speicher (QuotaExceededError) darf nicht stumm verschluckt werden.
+    alert('Speichern fehlgeschlagen — der Browser-Speicher ist voll oder blockiert.\n' +
+      'Bitte ein Backup exportieren (Einstellungen) und alte Besichtigungen löschen.');
+  }
 }
 function einstellung(name, standard) {
   const wert = localStorage.getItem(name);
@@ -378,6 +413,29 @@ async function medienLoeschen(schluessel) {
   const db = await oeffneDB();
   db.transaction('medien', 'readwrite').objectStore('medien').delete(schluessel);
 }
+async function medienAlleSchluessel() {
+  const db = await oeffneDB();
+  return new Promise((ok, nein) => {
+    const anfrage = db.transaction('medien').objectStore('medien').getAllKeys();
+    anfrage.onsuccess = () => ok(anfrage.result || []);
+    anfrage.onerror = () => nein(anfrage.error);
+  });
+}
+
+/** Start-Abgleich: Blobs ohne Metadaten-Referenz entfernen (z. B. wenn der
+    Metadaten-Write nach dem Blob-Write abgebrochen wurde). */
+async function raeumeVerwaisteMedienAuf() {
+  try {
+    const referenziert = new Set();
+    for (const b of besichtigungen) {
+      b.fotos.forEach(f => referenziert.add(f.id));
+      b.sprachnotizen.forEach(n => referenziert.add(n.id));
+    }
+    for (const schluessel of await medienAlleSchluessel()) {
+      if (!referenziert.has(schluessel)) await medienLoeschen(schluessel);
+    }
+  } catch (_) { /* Aufräumen ist Best-Effort */ }
+}
 
 const urlCache = new Map();
 async function medienURL(schluessel) {
@@ -387,6 +445,20 @@ async function medienURL(schluessel) {
   const url = URL.createObjectURL(blob);
   urlCache.set(schluessel, url);
   return url;
+}
+
+// ---------- Wake Lock: Display bei Kamera/Aufnahme wach halten ----------
+
+let wachhalter = null;
+async function bildschirmWachhalten() {
+  try {
+    if (!('wakeLock' in navigator) || wachhalter) return;
+    wachhalter = await navigator.wakeLock.request('screen');
+    wachhalter.addEventListener('release', () => { wachhalter = null; });
+  } catch (_) { /* nicht unterstützt oder verweigert — kein Problem */ }
+}
+function wachhalterFreigeben() {
+  if (wachhalter) { wachhalter.release().catch(() => {}); wachhalter = null; }
 }
 
 // ---------- ZIP-Erzeugung (Store-Methode, ohne Bibliotheken) ----------
@@ -454,15 +526,49 @@ function zipErstellen(eintraege) { // [{name, daten: Uint8Array}]
   return new Blob([...teile, ...zentral, new Uint8Array(ende.buffer)], { type: 'application/zip' });
 }
 
+/** Minimaler ZIP-Leser für Backups aus zipErstellen (nur Store-Methode).
+    Liefert Map dateiname → Uint8Array. */
+function zipLesen(puffer) {
+  const dv = new DataView(puffer);
+  // End-of-Central-Directory von hinten suchen (Kommentar max. 65535 Bytes)
+  let eocd = -1;
+  for (let i = puffer.byteLength - 22; i >= Math.max(0, puffer.byteLength - 22 - 65535); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('Keine gültige ZIP-Datei.');
+  const anzahl = dv.getUint16(eocd + 10, true);
+  let pos = dv.getUint32(eocd + 16, true);
+  const dateien = new Map();
+  const dekoder = new TextDecoder();
+  for (let i = 0; i < anzahl; i++) {
+    if (dv.getUint32(pos, true) !== 0x02014b50) throw new Error('ZIP-Struktur ungültig.');
+    const methode = dv.getUint16(pos + 10, true);
+    const groesse = dv.getUint32(pos + 20, true);
+    const nameLaenge = dv.getUint16(pos + 28, true);
+    const extraLaenge = dv.getUint16(pos + 30, true);
+    const kommentarLaenge = dv.getUint16(pos + 32, true);
+    const lokalOffset = dv.getUint32(pos + 42, true);
+    const name = dekoder.decode(new Uint8Array(puffer, pos + 46, nameLaenge));
+    if (methode !== 0) throw new Error('Nur unkomprimierte Backups dieser App werden unterstützt.');
+    // Datenposition über den lokalen Header ermitteln (Extra-Feld kann abweichen)
+    const lokalNameLaenge = dv.getUint16(lokalOffset + 26, true);
+    const lokalExtraLaenge = dv.getUint16(lokalOffset + 28, true);
+    const datenStart = lokalOffset + 30 + lokalNameLaenge + lokalExtraLaenge;
+    dateien.set(name, new Uint8Array(puffer, datenStart, groesse));
+    pos += 46 + nameLaenge + extraLaenge + kommentarLaenge;
+  }
+  return dateien;
+}
+
 // ---------- Spracherkennung (Safari/Chrome: webkitSpeechRecognition) ----------
 
-function erstelleErkennung(aufText, aufFehler) {
+function erstelleErkennung(aufText, aufFehler, startText = '') {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return null;
   let gestoppt = false;
-  let gesamt = '';    // finaler Text aus früheren Erkennungs-Sitzungen
+  let gesamt = String(startText).trim(); // vorhandener (ggf. korrigierter) Text, wird fortgesetzt
   let sitzung = '';   // finaler Text der laufenden Sitzung
-  let anzeige = '';
+  let anzeige = gesamt;
   const r = new SR();
   r.lang = 'de-DE';
   r.continuous = true;
@@ -717,7 +823,12 @@ function zeigeDetail(app, b) {
     ${kopfzeile(b.titel, { name: 'liste' }, '<button class="rechts" id="k-export">Export</button>')}
     <div class="inhalt ${istOffen ? '' : 'ohne-leiste'}">
       <div class="metabox" style="margin-top:0">
-        ${b.adresse ? `<div class="m-zeile"><b>Adresse</b>${escapeHTML(b.adresse)}</div>` : ''}
+        <div class="m-zeile"><b>Titel</b>
+          <input id="d-titel" style="width:100%;border:none;background:none;font:inherit;font-size:14px;outline:none"
+                 value="${escapeHTML(b.titel)}"></div>
+        <div class="m-zeile"><b>Adresse</b>
+          <input id="d-adresse" style="width:100%;border:none;background:none;font:inherit;font-size:14px;outline:none"
+                 placeholder="optional …" value="${escapeHTML(b.adresse || '')}"></div>
         <div class="m-zeile"><b>Erstellt</b>${formatDatumZeit(b.erstelltAm)}</div>
         ${b.abgeschlossenAm ? `<div class="m-zeile"><b>Abgeschlossen</b>${formatDatumZeit(b.abgeschlossenAm)}</div>` : ''}
         <div class="m-zeile"><b>Status</b><span class="status-punkt ${istOffen ? 'offen' : 'zu'}">${istOffen ? 'Offen' : 'Abgeschlossen'}</span></div>
@@ -744,6 +855,15 @@ function zeigeDetail(app, b) {
     </div>` : ''}`;
 
   bindeZurueck({ name: 'liste' });
+  $('#d-titel').onchange = ev => {
+    const neu = ev.target.value.trim();
+    if (!neu) { ev.target.value = b.titel; return; } // Titel ist Pflichtfeld
+    b.titel = neu;
+    speichereDaten();
+    const h1 = app.querySelector('.kopf h1');
+    if (h1) h1.textContent = neu;
+  };
+  $('#d-adresse').onchange = ev => { b.adresse = ev.target.value.trim() || null; speichereDaten(); };
   $('#d-notiz').onchange = ev => { b.freitextNotiz = ev.target.value.trim() || null; speichereDaten(); };
   $('#k-export').onclick = () => exportiere(b);
   if (istOffen) {
@@ -813,7 +933,9 @@ function zeigeKamera(app, b) {
     if (gpsWaechter !== null) navigator.geolocation.clearWatch(gpsWaechter);
     if (erkennung) erkennung.stoppen();
     if (fotoURL) URL.revokeObjectURL(fotoURL);
+    wachhalterFreigeben();
   };
+  bildschirmWachhalten();
 
   const naechsteNr = () => (b.fotos.length ? Math.max(...b.fotos.map(f => f.laufendeNr)) : 0) + 1;
   function dateinameVorschau() {
@@ -1005,16 +1127,16 @@ function zeigeKamera(app, b) {
     phaseLabel();
   }
 
-  function phaseLabel() {
-    labelText = '';
+  function phaseLabel(fortsetzen) {
+    if (!fortsetzen) labelText = '';
     app.innerHTML = `
       <div class="kamera">
         <div class="kamera-scroll">
           <img class="vorschau" src="${fotoURL}" alt="Aufgenommenes Foto">
           <div class="mikro-bereich">
             <span class="mikro puls" id="mikro">🎙️</span>
-            <div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:6px">Label jetzt einsprechen …</div>
-            <div class="live-text" id="live-text">…</div>
+            <div style="font-size:13px;color:rgba(255,255,255,0.65);margin-top:6px">${fortsetzen ? 'Weitersprechen — der Text wird ergänzt …' : 'Label jetzt einsprechen …'}</div>
+            <div class="live-text" id="live-text">${escapeHTML(labelText) || '…'}</div>
           </div>
           <button class="btn btn-primaer" id="ka-fertig">✓ Label fertig</button>
         </div>
@@ -1029,7 +1151,7 @@ function zeigeKamera(app, b) {
       if (el) el.textContent = erkennungsFehlerText(code);
       const mikro = $('#mikro');
       if (mikro) mikro.classList.remove('puls');
-    });
+    }, fortsetzen ? labelText : '');
     if (erkennung) {
       erkennung.starten();
     } else {
@@ -1053,6 +1175,8 @@ function zeigeKamera(app, b) {
           ${labelText ? '' : '<div class="kamera-hinweis">Kein Sprach-Input erkannt — bitte Label eintippen.</div>'}
           <div style="margin-top:18px">
             <button class="btn btn-primaer" id="ka-weiter">📷 Speichern — nächstes Foto</button>
+            ${(window.SpeechRecognition || window.webkitSpeechRecognition)
+              ? '<button class="btn btn-sekundaer" id="ka-sprechen" style="background:rgba(255,255,255,0.14);color:#fff">🎙️ Weiter einsprechen</button>' : ''}
             <button class="btn btn-sekundaer" id="ka-schliessen" style="background:rgba(255,255,255,0.14);color:#fff">Speichern &amp; Schließen</button>
             <button class="btn btn-rot" id="ka-wiederholen">Foto wiederholen</button>
           </div>
@@ -1090,6 +1214,11 @@ function zeigeKamera(app, b) {
     }
     $('#ka-weiter').onclick = () => speichern(true);
     $('#ka-schliessen').onclick = () => speichern(false);
+    const sprechen = $('#ka-sprechen');
+    if (sprechen) sprechen.onclick = () => {
+      labelText = eingabe.value; // manuelle Korrekturen übernehmen, Erkennung setzt darauf auf
+      phaseLabel(true);
+    };
     $('#ka-wiederholen').onclick = () => {
       URL.revokeObjectURL(fotoURL); fotoURL = null; fotoBlob = null;
       phaseLive();
@@ -1111,7 +1240,9 @@ function zeigeSprachnotiz(app, b) {
     if (rekorder && rekorder.state !== 'inactive') rekorder.stop();
     if (stream) stream.getTracks().forEach(t => t.stop());
     if (erkennung) erkennung.stoppen();
+    wachhalterFreigeben();
   };
+  bildschirmWachhalten();
 
   phaseBereit();
 
@@ -1256,8 +1387,10 @@ function zeigeFotoDetail(app, b, fotoId) {
     const andere = new Set(b.fotos.filter(f => f.id !== foto.id).map(f => slugAusDateiname(f.dateiname)));
     foto.dateiname = `${pad(foto.laufendeNr, 3)}_${slugEindeutig(slug, andere)}.jpg`;
     speichereDaten();
+    eingabe.value = foto.labelText;
     $('#fd-dateiname').textContent = foto.dateiname;
     $('#fd-speichern').hidden = true;
+    zeigeGespeichert(eingabe.closest('.feldgruppe'));
   };
   $('#fd-loeschen').onclick = () => {
     if (!confirm('Foto endgültig löschen?')) return;
@@ -1299,6 +1432,7 @@ function zeigeNotizDetail(app, b, notizId) {
     notiz.transkript = feld.value.trim() || null;
     speichereDaten();
     $('#nd-speichern').hidden = true;
+    zeigeGespeichert(feld);
   };
   $('#nd-loeschen').onclick = () => {
     if (!confirm('Sprachnotiz endgültig löschen?')) return;
@@ -1307,6 +1441,104 @@ function zeigeNotizDetail(app, b, notizId) {
     speichereDaten();
     navigiere({ name: 'detail', id: b.id });
   };
+}
+
+// ---------- API-Key-Test ----------
+
+/* Modell für Protokollerzeugung und Key-Test — an einer Stelle gepflegt,
+   damit beide nicht auseinanderlaufen. */
+const KI_MODELL = 'claude-opus-4-8';
+
+/** Minimaler Ping an die Messages-API (1 Token), um den Key zu verifizieren. */
+async function testeApiKey(schluessel) {
+  const antwort = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-api-key': schluessel,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: KI_MODELL,
+      max_tokens: 1,
+      messages: [{ role: 'user', content: 'Hi' }]
+    })
+  });
+  if (antwort.ok) return { ok: true };
+  let detail = '';
+  try { detail = (await antwort.json()).error?.message || ''; } catch (_) {}
+  if (antwort.status === 401) return { ok: false, meldung: 'Key ungültig (401).' };
+  return { ok: false, meldung: detail || `HTTP ${antwort.status}` };
+}
+
+// ---------- Backup: kompletter Speicherstand als ZIP ----------
+
+const BACKUP_VERSION = 1;
+
+async function exportiereBackup() {
+  const encoder = new TextEncoder();
+  const eintraege = [];
+  const medienTypen = {};
+
+  for (const b of besichtigungen) {
+    for (const m of [...b.fotos, ...b.sprachnotizen]) {
+      const blob = await medienLaden(m.id);
+      if (!blob) continue;
+      medienTypen[m.id] = blob.type || '';
+      eintraege.push({ name: `medien/${m.id}`, daten: new Uint8Array(await blob.arrayBuffer()) });
+    }
+  }
+  eintraege.unshift({
+    name: 'backup.json',
+    daten: encoder.encode(JSON.stringify({
+      version: BACKUP_VERSION,
+      exportiertAm: new Date().toISOString(),
+      besichtigungen,
+      medienTypen
+    }, null, 2))
+  });
+
+  const name = `Besichtigung_Backup_${isoDatum(new Date().toISOString())}.zip`;
+  const zipBlob = zipErstellen(eintraege);
+  const datei = new File([zipBlob], name, { type: 'application/zip' });
+  if (navigator.canShare && navigator.canShare({ files: [datei] })) {
+    try { await navigator.share({ files: [datei], title: 'Besichtigungs-Backup' }); return; }
+    catch (f) { if (f && f.name === 'AbortError') return; }
+  }
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/** Spielt ein Backup-ZIP ein. Besichtigungen mit gleicher ID werden ersetzt,
+    neue werden ergänzt — bestehende andere bleiben unberührt. */
+async function importiereBackup(datei) {
+  const dateien = zipLesen(await datei.arrayBuffer());
+  const backupBytes = dateien.get('backup.json');
+  if (!backupBytes) throw new Error('backup.json fehlt — kein Backup dieser App.');
+  const backup = JSON.parse(new TextDecoder().decode(backupBytes));
+  if (!Array.isArray(backup.besichtigungen)) throw new Error('Backup-Inhalt unlesbar.');
+  if (backup.version > BACKUP_VERSION) throw new Error('Backup stammt aus einer neueren App-Version.');
+
+  if (!confirm(`Backup vom ${formatDatumZeit(backup.exportiertAm)} mit ` +
+    `${backup.besichtigungen.length} Besichtigung(en) einspielen?\n` +
+    'Besichtigungen mit gleicher ID werden ersetzt, andere bleiben erhalten.')) return false;
+
+  const typen = backup.medienTypen || {};
+  for (const [name, daten] of dateien) {
+    if (!name.startsWith('medien/')) continue;
+    const id = name.slice('medien/'.length);
+    await medienSpeichern(id, new Blob([daten], { type: typen[id] || '' }));
+  }
+  for (const neu of backup.besichtigungen) {
+    const index = besichtigungen.findIndex(x => x.id === neu.id);
+    if (index >= 0) besichtigungen[index] = neu;
+    else besichtigungen.push(neu);
+  }
+  speichereDaten();
+  return true;
 }
 
 // ---------- Screen 8: Einstellungen ----------
@@ -1327,11 +1559,18 @@ function zeigeEinstellungen(app) {
         <input id="e-key" type="password" placeholder="sk-ant-…" autocomplete="off"
                value="${escapeHTML(localStorage.getItem('anthropicApiKey') || '')}">
       </div>
+      <button class="btn btn-sekundaer btn-klein" id="e-key-test">Key testen</button>
+      <div class="fussnote" id="e-key-status" style="margin:-2px 4px 14px"></div>
       <div class="schalter-zeile">
         <span>Fotos mitanalysieren</span>
         <input type="checkbox" id="e-fotos" ${einstellung('fotosAnalysieren', true) ? 'checked' : ''}>
       </div>
       <div class="fussnote" style="margin-top:8px">Der Key wird nur lokal auf diesem Gerät gespeichert und direkt an die Anthropic-API gesendet — er landet nie auf einem anderen Server. Empfehlung: eigener Workspace mit Ausgabenlimit (console.anthropic.com). „Fotos mitanalysieren" ergänzt im Protokoll „aus Foto erkennbar…"-Feststellungen.</div>
+      <div class="sektion-titel">Backup</div>
+      <button class="btn btn-primaer btn-klein" id="e-backup-export">Backup exportieren (ZIP)</button>
+      <button class="btn btn-sekundaer btn-klein" id="e-backup-import">Backup einspielen …</button>
+      <input type="file" accept=".zip,application/zip" id="e-backup-datei" hidden>
+      <div class="fussnote" id="e-backup-status" style="margin:-2px 4px 14px">Browser-Speicher kann vom System geräumt werden — regelmäßige Backups sichern alle Besichtigungen samt Fotos und Audio.</div>
       <div class="sektion-titel">Über diesen Prototyp</div>
       <div class="metabox" style="margin-top:0">
         <div class="m-zeile">Dies ist eine Web-Demo der geplanten iOS-App. Unterschiede zur echten App:</div>
@@ -1345,10 +1584,57 @@ function zeigeEinstellungen(app) {
   bindeZurueck({ name: 'liste' });
   $('#e-audio').onchange = ev => localStorage.setItem('audioMitExportieren', ev.target.checked ? '1' : '0');
   $('#e-fotos').onchange = ev => localStorage.setItem('fotosAnalysieren', ev.target.checked ? '1' : '0');
+  const keyStatus = $('#e-key-status');
   $('#e-key').onchange = ev => {
     const wert = ev.target.value.trim();
     if (wert) localStorage.setItem('anthropicApiKey', wert);
     else localStorage.removeItem('anthropicApiKey');
+    keyStatus.textContent = (wert && !wert.startsWith('sk-ant-'))
+      ? '⚠️ Ungewöhnliches Format — Anthropic-Keys beginnen üblicherweise mit „sk-ant-".'
+      : '';
+  };
+  $('#e-key-test').onclick = async ev => {
+    const schluessel = $('#e-key').value.trim();
+    if (!schluessel) { keyStatus.textContent = 'Bitte zuerst einen Key eintragen.'; return; }
+    localStorage.setItem('anthropicApiKey', schluessel);
+    ev.target.disabled = true;
+    keyStatus.textContent = '⏳ Teste Key …';
+    try {
+      const ergebnis = await testeApiKey(schluessel);
+      keyStatus.textContent = ergebnis.ok ? '✅ Key funktioniert.' : '❌ ' + ergebnis.meldung;
+    } catch (fehler) {
+      keyStatus.textContent = '❌ Netzwerkfehler: ' + fehler.message;
+    } finally {
+      ev.target.disabled = false;
+    }
+  };
+
+  const backupStatus = $('#e-backup-status');
+  $('#e-backup-export').onclick = async ev => {
+    ev.target.disabled = true;
+    backupStatus.textContent = '⏳ Backup wird erstellt …';
+    try {
+      await exportiereBackup();
+      backupStatus.textContent = '✅ Backup erstellt.';
+    } catch (fehler) {
+      backupStatus.textContent = '❌ Backup fehlgeschlagen: ' + fehler.message;
+    } finally {
+      ev.target.disabled = false;
+    }
+  };
+  const backupDatei = $('#e-backup-datei');
+  $('#e-backup-import').onclick = () => backupDatei.click();
+  backupDatei.onchange = async () => {
+    const datei = backupDatei.files[0];
+    backupDatei.value = '';
+    if (!datei) return;
+    backupStatus.textContent = '⏳ Backup wird eingespielt …';
+    try {
+      const uebernommen = await importiereBackup(datei);
+      backupStatus.textContent = uebernommen ? '✅ Backup eingespielt.' : '';
+    } catch (fehler) {
+      backupStatus.textContent = '❌ Import fehlgeschlagen: ' + fehler.message;
+    }
   };
 }
 
@@ -1552,7 +1838,7 @@ async function rufeClaudeAuf(b, mitFotos, signal, aufText) {
       'anthropic-dangerous-direct-browser-access': 'true'
     },
     body: JSON.stringify({
-      model: 'claude-opus-4-8',
+      model: KI_MODELL,
       max_tokens: 16000,
       stream: true,
       thinking: { type: 'adaptive' },
@@ -1712,6 +1998,8 @@ function zeigeProtokoll(app, b) {
     };
   }
 
+  const MAX_VERSUCHE = 3;
+
   async function erzeuge(versuch) {
     const steuerung = new AbortController();
     aufraeumFn = () => steuerung.abort();
@@ -1720,17 +2008,25 @@ function zeigeProtokoll(app, b) {
     $('#prot-aktionen').hidden = true;
     const mitFotos = einstellung('fotosAnalysieren', true) && b.fotos.length > 0;
     try {
+      // Markdown schon während des Streamings rendern (gedrosselt auf ~300 ms)
+      let letzteDarstellung = 0;
       const text = await rufeClaudeAuf(b, mitFotos, steuerung.signal, laufend => {
-        inhaltEl.textContent = laufend;
+        const jetzt = Date.now();
+        if (jetzt - letzteDarstellung < 300) return;
+        letzteDarstellung = jetzt;
+        inhaltEl.innerHTML = mdZuHtml(laufend);
       });
       b.protokoll = { text, erstelltAm: new Date().toISOString(), mitFotos };
       speichereDaten();
       zeigeFertig();
     } catch (fehler) {
       if (fehler.name === 'AbortError') return;
-      if ((fehler.status === 429 || fehler.status === 529) && versuch === 1) {
-        statusEl.textContent = 'API ausgelastet — neuer Versuch in 5 Sekunden …';
-        setTimeout(() => erzeuge(2), 5000);
+      // Überlast (429/529): exponentielles Backoff, bis zu MAX_VERSUCHE Anläufe
+      if ((fehler.status === 429 || fehler.status === 529) && versuch < MAX_VERSUCHE) {
+        const wartezeit = 5000 * versuch; // 5 s, dann 10 s
+        statusEl.textContent = `API ausgelastet — neuer Versuch in ${wartezeit / 1000} Sekunden (${versuch + 1}/${MAX_VERSUCHE}) …`;
+        const timeout = setTimeout(() => erzeuge(versuch + 1), wartezeit);
+        aufraeumFn = () => clearTimeout(timeout);
         return;
       }
       const meldung = fehler.status === 401
@@ -1749,11 +2045,46 @@ function zeigeProtokoll(app, b) {
 
 // ---------- Start ----------
 render();
+raeumeVerwaisteMedienAuf(); // Best-Effort im Hintergrund
 
-// PWA: Service Worker für Offline-Start registrieren (HTTPS oder localhost)
+// PWA: Service Worker registrieren; bei neuer Version dezentes Update-Banner
+// zeigen statt still zu aktivieren (sw.js wartet auf SKIP_WAITING).
+function zeigeUpdateBanner(registrierung) {
+  if (document.getElementById('update-banner')) return;
+  const banner = document.createElement('div');
+  banner.className = 'update-banner';
+  banner.id = 'update-banner';
+  banner.innerHTML = '<span>Neue Version verfügbar</span><button id="update-jetzt">Neu laden</button>';
+  document.body.appendChild(banner);
+  banner.querySelector('#update-jetzt').onclick = () => {
+    if (registrierung.waiting) registrierung.waiting.postMessage('SKIP_WAITING');
+    else location.reload();
+  };
+}
+
 if ('serviceWorker' in navigator &&
     (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.register('sw.js').then(registrierung => {
+    const beobachte = worker => {
+      if (!worker) return;
+      worker.addEventListener('statechange', () => {
+        // "installed" + vorhandener Controller = Update wartet (kein Erstbesuch)
+        if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+          zeigeUpdateBanner(registrierung);
+        }
+      });
+    };
+    if (registrierung.waiting && navigator.serviceWorker.controller) zeigeUpdateBanner(registrierung);
+    beobachte(registrierung.installing);
+    registrierung.addEventListener('updatefound', () => beobachte(registrierung.installing));
+  }).catch(() => {});
+
+  let neuGeladen = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (neuGeladen) return;
+    neuGeladen = true;
+    location.reload();
+  });
 }
 </script>
 </body>
